@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "IBDecay"
+version = "0.1"
+description = "Analyse IBD between distinct populations"
+authors = [
+    {name = "Pautet", email = "florence_pautet@eva.mpg.de"}
+]
+license = "GPL-3.0-or-later"
+readme = "README.md"
+requires-python = ">=3.6"
+dependencies = [
+    "scikit-learn>=1.0",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/ebimsv/mlpredictor"

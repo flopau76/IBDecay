@@ -1,0 +1,318 @@
+from IBDecay.utils import DataIBD, DataROH
+from IBDecay.expectations import Calculator_ROH, Calculator_IBD
+
+from pandera.typing import DataFrame
+from typing import Literal
+
+import numpy as np
+import pandas as pd
+import warnings
+import matplotlib.pyplot as plt
+import matplotlib.colors as colors
+import matplotlib.patheffects as pe
+from matplotlib import gridspec
+from matplotlib.patches import Patch
+from matplotlib.axes import Axes
+
+# inbreeding defined by (nb of meiosis, nb of common ancestors)
+pedigree_dict = {
+    'FS': (4, 2, 'Full Siblings'),
+    'HS': (4, 1, 'Half Siblings'),
+    'AV': (5, 2, 'Aunt/Nephew'),
+    'C1': (6, 2, 'First Cousins'),
+    'C2': (8, 2, 'Second Cousins'),
+    'C3': (10, 2, 'Third Cousins'),
+    'PO': (3, 1, 'Parent/Offspring')
+}
+
+class Plotter:
+    def __init__(self):
+
+        # colors for expected lines
+        self.Ne_colors = ["#fde725", "#5ec962", "#21918c", "#3b528b", "#440154", "k"]
+        self.delta_t_colors = ["#fde725", "#5ec962", "#21918c", "#3b528b", "#440154", "k"]
+        self.pedigree_colors = ['red', 'green', 'blue', 'purple', 'brown']
+
+        # histogramm colors
+        self.kwargs_histo_one_site = {"color": "sandybrown", "edgecolor": "gray", "alpha": 1}
+        self.kwargs_histo_two_site = {"site_a" : {"color": "blue", "edgecolor": "gray", "alpha": 0.6},
+                                "site_b" : {"color": "violet", "edgecolor": "gray", "alpha": 0.6},
+                                "cross"  : {"color": "lime", "edgecolor": "gray", "alpha": 0.6}}
+
+        # various
+        self.figsize = (6,6)
+        self.xlim = None
+        self.ylim = None
+        self.yscale = 'log'
+        self.fontsize = 12
+
+
+    def _format_ax(self, ax, xlabel:str, ylabel:str):
+        # Replace the original x-axis in Morgans by one in cM
+        ax.get_xaxis().set_visible(False)
+        new_ax = ax.secondary_xaxis('bottom', functions=(lambda x: x*100, lambda x: x/100))
+        new_ax.set_xlabel(xlabel, fontsize=self.fontsize)
+        ax.set_ylabel(ylabel, fontsize=self.fontsize)
+        plt.yscale(self.yscale)
+        ax.set_xlim(self.xlim)
+        ax.set_ylim(self.ylim)
+
+#___________________________________________________
+# Histograms at population levels
+#___________________________________________________
+    def plot_histo(self, df_roh, nb_normalize: int|None=None, bins=np.arange(0.08, 0.30, 0.005), data_type:Literal['IBD', 'ROH']='IBD',
+            Ne:list[int]=[1500, 3000, 5000], pedigrees:list[Literal['FS', 'HS', 'AV', 'C1', 'C2', 'C3', 'PO']]=[]
+        ):
+        """Plot data histogram."""
+        fig, ax = plt.subplots(figsize=self.figsize)
+
+        # Get the number of individuals to normalize the plot
+        if nb_normalize is None:
+            if data_type == 'ROH':
+                nb_normalize = df_roh.groupby('iid').ngroups
+            else:
+                nb_normalize = df_roh.groupby(['iid1', 'iid2']).ngroups
+
+        # Plot the actual histogram
+        ax.hist(df_roh['lengthM'], bins=bins, weights=np.full(len(df_roh), 1/nb_normalize), **self.kwargs_histo_one_site)
+
+        ax.set_xlim(bins[0], bins[-1]+(bins[1]-bins[0]))
+        self._format_ax(ax, f"{data_type} segment length (cM)", f"Average nb of {data_type} segments per {'pair' if data_type=='IBD' else 'individual'}")
+
+        # Plot the expected histogram for a constant Ne
+        calculator = Calculator_ROH()
+        bin_mids = bins[:-1] + (bins[1:] - bins[:-1]) / 2
+        bin_width = bins[1:] - bins[:-1]
+        for N, c in zip(Ne, self.Ne_colors):
+            y = calculator.roh_density_Ne(bin_mids, N) * bin_width * (1 if data_type=='ROH' else 4)
+            ax.plot(bin_mids, y, color=c, linestyle='dashed', scaley=False)
+            ax.text(bin_mids[0], y[0], f"Ne={N}", color='black', fontsize=self.fontsize)
+        # Plot the expected histogram for a pedigree
+        if data_type == 'ROH' and len(pedigrees) > 0:
+            for ped, c in zip(pedigrees, self.pedigree_colors):
+                m, comm_anc, ped_name = pedigree_dict[ped]
+                y = calculator.roh_density_pedigree(bin_mids, m, comm_anc) * bin_width
+                ax.plot(bin_mids, y, color=c, linestyle='solid', label=ped_name, scaley=False)
+            # add legend
+            leg = ax.legend(fontsize=self.fontsize)
+            leg.set_title("Parents being...", prop = {'size':self.fontsize})
+            ax.tick_params(axis='both', which='major', labelsize=self.fontsize)
+        return fig
+
+    def plot_ibd_two_sites(self, df_ibd1:DataFrame[DataIBD], df_ibd2:DataFrame[DataIBD], df_ibd_cross:DataFrame[DataIBD],
+                            nb_pairs_1: int, nb_pairs_2: int, nb_pairs_cross: int, bins=np.arange(0.08, 0.30, 0.005),
+                            Ne:list[int]=[1500, 3000, 5000], delta_t:list[int]=[],
+                            name_site1:str="", name_site2:str=""
+        ):
+        """Plot IBD Histogram comparing two sites."""
+        fig, ax = plt.subplots(figsize=self.figsize)
+
+        # Get the number of pairs to normalize the plot
+        if nb_pairs_1 is None:
+            nb_pairs_1 = df_ibd1.groupby(['iid1', 'iid2']).ngroups
+        if nb_pairs_2 is None:
+            nb_pairs_2 = df_ibd2.groupby(['iid1', 'iid2']).ngroups
+        if nb_pairs_cross is None:
+            nb_pairs_cross = df_ibd_cross.groupby(['iid1', 'iid2']).ngroups
+
+        # Plot the actual histogram
+        ax.hist(df_ibd1['lengthM'], bins=bins, weights=np.full(len(df_ibd1), 1/nb_pairs_1), label=name_site1, **self.kwargs_histo_two_site["site_a"])
+        ax.hist(df_ibd2['lengthM'], bins=bins, weights=np.full(len(df_ibd2), 1/nb_pairs_2), label=name_site2, **self.kwargs_histo_two_site["site_b"])
+        ax.hist(df_ibd_cross['lengthM'], bins=bins, weights=np.full(len(df_ibd_cross), 1/nb_pairs_cross), label="between", **self.kwargs_histo_two_site["cross"])
+
+        plt.legend(loc='upper right', title="IBD Sharing", fontsize=self.fontsize)
+        ax.set_xlim(bins[0], bins[-1]+(bins[1]-bins[0]))
+        self._format_ax(ax, 'IBD segment length (cM)', 'Average nb of IBD segments per pair')
+
+        ### Expectations
+        # IBD decay
+        calculator_ibd = Calculator_IBD(bins=bins, df_0=df_ibd1)
+        bin_mids = bins[:-1] + (bins[1:] - bins[:-1]) / 2
+        bin_size = bins[1:] - bins[:-1]
+        xdt = calculator_ibd.ibd_decay_analytics(delta_t) / nb_pairs_1
+        for i, (dt, c) in enumerate(zip(delta_t, self.delta_t_colors)):
+            ax.plot(bin_mids, xdt[i, :], color=c, linestyle='solid', scaley=False)
+            ax.text(bin_mids[1], xdt[i, 1], f"dt={dt}", color='black', rotation=-40, rotation_mode='anchor', fontsize=self.fontsize)
+        # Constant Ne
+        calculator_roh = Calculator_ROH()
+        for N, c in zip(Ne, self.Ne_colors):
+            y = 4 * calculator_roh.roh_density_Ne(bin_mids, N) * bin_size
+            ax.plot(bin_mids, y, color=c, linestyle='dashed', scaley=False)
+            ax.text(bin_mids[0], y[0], f"Ne={N}", color='black', fontsize=self.fontsize)
+
+        return fig
+#___________________________________________________
+# Summary stats with one bar per inividual
+#___________________________________________________
+    def plot_summary_stats(self, df_stats, L=[8,12,16,20],
+                legend=True, x_ticks=True, y_ticks=True):
+        """Plot the distribution of one summary stats as a bar plot
+        df_stats can be obtained by running get_stats(df_RoH, L)
+        L is the list of thresholds [in cM] considered (ie amount/length of roh >= x with x in L)"""
+
+        # Plot settings
+        color = ["#313695", "#abd9e9", "#fee090", "#d7191c"]
+        ylabel = f"Sum of inferred ROH>{L[0]}cM [cM]"
+
+        fig, ax = plt.subplots(figsize=self.figsize)
+        
+        # Prepare data
+        data = 100 * df_stats[[f"sum_ROH>{n}" for n in L]].values
+        if "iid" in df_stats.columns:
+            ids = df_stats["iid"].values
+        else:
+            raise ValueError("iid not found in dataframe")
+        x = np.arange(len(ids))
+        bottom = np.zeros((len(ids), len(L)))
+        for i in range(1,len(L)):
+            bottom[:,i] = data[:,0]-data[:,i]
+
+        # Make plot for each bin
+        for i in range(len(L)):
+            ax.bar(x, data[:,i], bottom=bottom[:,i], width=0.8, color=color[i], edgecolor="black", label=f"{L[i]}-{L[i+1]} cM" if i<len(L)-1 else f">{L[i]} cM")
+
+        ax.legend(title="Sum of ROH in", title_fontsize=self.fontsize, fontsize=self.fontsize, loc="upper right")
+        if x_ticks:
+            ax.set_xticks(x)
+            ax.set_xticklabels(ids, fontsize=self.fontsize, rotation=270)
+        else:
+            ax.tick_params(bottom = False, labelbottom = False)
+        if y_ticks:
+            ax.set_ylabel(ylabel, fontsize=self.fontsize)
+        else:
+            ax.tick_params(left = False, labelleft = False)
+        ax.tick_params(labelsize=self.fontsize)
+        ax.set_xlim(-1, len(ids))
+#___________________________________________________
+# Chromosome details at individual level
+#___________________________________________________
+    def _plot_single_chromosome(self, ax:Axes, pos_x:float, chrom_length:float, df_RG, df_RG2, unit:Literal['BP', 'Morgans']='Morgans'):
+        """Plot a Chromosome of length l on ax"""
+
+        # Plot settings
+        width = 0.8
+        c1 = "maroon"
+        c2 = "saddlebrown"
+
+        start_col = "StartBP" if unit=="BP" else "StartM"
+        end_col = "EndBP" if unit=="BP" else "EndM"
+
+        # Convert width in axis coordinate to linewith in figure coordinate (nb of points)
+        fig = ax.get_figure()
+        length = fig.bbox_inches.width * ax.get_position().width * 72    # 72=nb of points/inch
+        lw = width * length / np.diff(ax.get_xlim())
+
+        ### Plot chromosome outline
+        ax.plot([pos_x, pos_x], [0, chrom_length], lw = lw, color="lightgray",
+                    solid_capstyle = 'round', zorder=0,
+                    path_effects=[pe.Stroke(linewidth=lw+3, foreground='k'), pe.Normal()])
+
+        ### Plot the dataframe if only one is given
+        if df_RG2 is None:
+            ax.vlines(x=np.full(len(df_RG), pos_x), ymin=df_RG[start_col], ymax=df_RG[end_col], lw=lw, color=c1)
+
+        ### Otherwise plot both dataframes next to each other
+        else:
+            ax.vlines(x=np.full(len(df_RG), pos_x-0.25*width), ymin=df_RG[start_col], ymax=df_RG[end_col], lw=lw*0.45, color=c1)
+            ax.vlines(x=np.full(len(df_RG2), pos_x+0.25*width), ymin=df_RG2[start_col], ymax=df_RG2[end_col], lw=lw*0.45, color=c2)
+
+    def plot_all_chromosomes(self, chrom_length:list[float], data_RG:DataFrame[DataROH], data_RG2:DataFrame[DataROH]|None=None,
+                            unit:Literal['BP', 'Morgans']='Morgans',
+                            legend:tuple|None=None,
+                            savepath:str|None=None,
+                            ):
+        """Plot ROH in one individual"""
+
+        # Plot settings
+        c1 = "maroon"
+        c2 = "saddlebrown"
+
+        xlim = (0.5, len(chrom_length) + 0.5)
+        ylim = (-0.05 * np.max(chrom_length), 1.05 * np.max(chrom_length))
+
+        fig, ax = plt.subplots(figsize=self.figsize)
+
+        ### Set the Plot Limits
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
+        ### Tick the X Axis
+        rang = np.arange(1,len(chrom_length)+1)
+        ax.set_xticks(rang)
+        ax.set_xticklabels(rang, fontsize=self.fontsize)
+        ax.set_xlabel("Chromosome", fontsize=self.fontsize)
+        ylabel = "Position (bp)" if unit=="BP" else "Position (Morgan)"
+        ax.set_ylabel(ylabel, fontsize=self.fontsize)
+        ### Plot the chromosomes
+        for ch, ch_len in enumerate(chrom_length, start=1):
+            df_ch = data_RG[data_RG['ch'] == ch]
+            if data_RG2 is not None:
+                df_ch2 = data_RG2[data_RG2['ch'] == ch]
+            else:
+                df_ch2 = None
+            self._plot_single_chromosome(ax, pos_x=ch, chrom_length=ch_len, df_RG=df_ch, df_RG2=df_ch2, unit=unit)
+
+        if data_RG2 is not None and legend is not None:
+            legend_elements = [Patch(facecolor=c1, edgecolor=c1, label=legend[0]),
+                            Patch(facecolor=c2, edgecolor=c2, label=legend[1])]
+            ax.legend(handles=legend_elements, loc="lower center", ncols=2, fontsize=self.fontsize)
+
+        if savepath is not None:
+            plt.savefig(savepath, bbox_inches = 'tight', pad_inches = 0.1, dpi=300)
+        return fig
+#___________________________________________________
+# Detail of results for one individual on one chromosome
+#___________________________________________________
+    def plot_chromosome_detail(self, data:DataFrame[DataROH]):
+        """
+        """
+        # Plot settings
+        p_color = 'maroon'
+        het_color = 'blue'
+        roh_color = 'blue'
+        cmap = 'viridis' # 'seismic'
+        roh_lw = 6
+        ylim = (-0.1, 1.3)
+
+        fig, ax = plt.subplots(figsize=self.figsize)
+
+        ax.hlines(xmin=data['StartM'], xmax=data['EndM'], y=[1.2]*len(data.index), color=roh_color, linewidth=roh_lw)
+
+        # ax.set_xlabel("Genetic Position (cM)", fontsize=fs)
+        ax.set_xlabel("Genetic position (Morgans)", fontsize=self.fontsize)
+
+        return fig
+#___________________________________________________
+# Heatmap of log-likelihood
+#___________________________________________________
+    def plot_ll_heatmap(self, ll, t_grid, admix_grid, true_admix=None, true_time=None, gamma=10):
+        """Plot log-likelihood heatmap."""
+        fig, ax = plt.subplots(figsize=self.figsize)
+
+        norm = colors.PowerNorm(gamma=gamma)
+        c = ax.imshow(ll, origin='lower', aspect='auto', extent=(admix_grid[0], admix_grid[-1], t_grid[0], t_grid[-1]), cmap='viridis', norm=norm)
+        cbar = fig.colorbar(c, ax=ax, label='Log-Likelihood')
+        ticks = np.linspace(0,1, num=7)
+        ticks = norm.inverse(ticks)
+        ticks_r = np.round(ticks, 0)
+        if len(np.unique(ticks_r)) < 7:
+            ticks_r = np.round(ticks, 1)
+        cbar.set_ticks(ticks_r) # type: ignore
+
+        # MLE point
+        time_opt, admix_opt = np.unravel_index(np.argmax(ll, axis=None), ll.shape)
+        time_opt = t_grid[time_opt]
+        admix_opt = admix_grid[admix_opt]
+        ax.scatter(admix_opt, time_opt, marker='+', color='red', s=100, label=f'MLE: time={time_opt:.0f}, admix={admix_opt:.2f}')
+        # True optimal point
+        if true_time is not None:
+            ax.scatter(true_admix, true_time, marker='x', color='firebrick', s=100, label=f'True: time={true_time}, admix={true_admix:.2f}')
+
+        # Confidence interval contour
+        threshold_2d = np.max(ll) - 5.991/2     # # chi^2(2, 0.95)/2
+        ax.contour(admix_grid, t_grid, ll, levels=[threshold_2d], colors='red', linewidths=2)
+
+        ax.set_xlabel('Admixture Proportion')
+        ax.set_ylabel('Time passed (generations)')
+        ax.set_title('Log-likelihood colormap')
+        ax.legend()
+        return fig
