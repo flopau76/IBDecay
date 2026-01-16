@@ -1,19 +1,17 @@
 #___________________________________________________
 # Necessary imports
 #___________________________________________________
-import os
+
 import pandas as pd
 import numpy as np
 
-# type hinting:
-import pandera.pandas as pa
-from pandera.typing import Series, DataFrame
+from typing import TypedDict
 
 chromosome_lengthsM_human = [2.8426, 2.688187, 2.232549, 2.14201, 2.040477, 1.917145, 1.871491, 1.680018, 
             1.661367, 1.8090949, 1.5821669, 1.745901, 1.2551429, 1.1859521, 1.413411, 
             1.340264, 1.2849959, 1.175495, 1.0772971, 1.082123, 0.636394, 0.724438]
 
-chromosome_lengths_macaque = [ 223616716, 196192209, 185287830, 169962632, 
+chromosome_lengthsBP_macaque = [ 223616716, 196192209, 185287830, 169962632, 
                 187314383, 179082969, 169867068, 145676177, 
                 134123906, 99508945, 133063178, 130042031, 
                 108732418, 128052760, 113274796, 79622849, 
@@ -29,60 +27,58 @@ chromosome_lengthsM_macaque = [1.0426104, 0.9114943, 0.88774445, 0.9821343,
 # Data Format
 #___________________________________________________
 
-class DataROH(pa.DataFrameModel):
-    iid: Series
-    StartM: Series[float]       # in Morgans
-    EndM: Series[float]         # in Morgans
-    length: Series[int]
-    lengthM: Series[float]      # in Morgans
-    ch: Series[int]
-    StartBP: Series[int]
-    EndBP: Series[int]
+class DataROH_Schema(TypedDict):
+    iid: object
+    Start: int
+    End: int
+    StartM: float
+    EndM: float
+    length: int
+    lengthM: float
+    ch: int
 
-class DataIBD(pa.DataFrameModel):
-    Start: Series[int]
-    End: Series[int]
-    StartM: Series[float]       # in Morgans
-    EndM: Series[float]         # in Morgans
-    length: Series[int]
-    lengthM: Series[float]      # in Morgans
-    ch: Series[int]
-    StartBP: Series[int]
-    EndBP: Series[int]
-    iid1: Series
-    iid2: Series
-    SNP_Dens: Series[float]
+class DataIBD_Schema(TypedDict):
+    iid1: object
+    iid2: object
+    Start: int
+    End: int
+    StartM: float
+    EndM: float
+    length: int
+    lengthM: float
+    ch: int
+    SNP_Dens: float     # optionnal
 
-class DataIBDInd(pa.DataFrameModel):
-    iid1: Series
-    iid2: Series
-    max_IBD: Series[float]
-    sum_IBD_8: Series[float]    # sum_IBD>8
-    n_IBD_8: Series[int]        # n_IBD>8
-    sum_IBD_12: Series[float]
-    n_IBD_12: Series[int]
-    sum_IBD_16: Series[float]
-    n_IBD_16: Series[int]
-    sum_IBD_20: Series[float]
-    n_IBD_20: Series[int]
+class DataIBDStats_Schema(TypedDict):
+    iid1: object
+    iid2: object
+    max_IBD: float
+    sum_IBD_8: float
+    n_IBD_8: int
+    sum_IBD_12: float
+    n_IBD_12: int
+    sum_IBD_16: float
+    n_IBD_16: int
+    sum_IBD_20: float
+    n_IBD_20: int
 
-class DataMeta(pa.DataFrameModel):
-    Master_ID: Series
-    iid: Series
-    frac_gp: Series[float]
-    frac_missing: Series[float]
-    frac_het: Series[float]
-    n_cov_snp: Series[int]
-    Archaeological_ID: Series
-    Projects: Series
-    Locality: Series
-    Province: Series
-    Country: Series
-    Latitude: Series[float]
-    Longitude: Series[float]
-    date: Series
-    date_type: Series
-    imputation_type: Series
+class DataMetaSchema(TypedDict):
+    Master_ID: object
+    iid: object
+    frac_gp: float
+    frac_missing: float
+    frac_het: float
+    n_cov_snp: int
+    Archaeological_ID: object
+    Projects: object
+    Locality: object
+    Province: object
+    Country: object
+    Latitude: float
+    Longitude: float
+    date: object
+    date_type: object
+    imputation_type: object
 
 #___________________________________________________
 # Data manipulation
@@ -94,19 +90,12 @@ class DataHandler:
         self.df_ibd = df_ibd
         self.df_ibd_ind = df_ibd_ind
 
-    def get_iids_meta(self, iids) -> set[str]:
-        """Return the list of iids present in the metadata."""
+    def filter_iids_meta(self, iids) -> set[str]:
+        """Return the subset of iids present in the metadata."""
         return set(self.df_meta[self.df_meta['iid'].isin(iids)]['iid'])
 
-    def filter_quality(self, iids, filters=[("frac_gp", 0.7, 1.0)]) -> set[str]:
-        """Filter iids based on specified column ranges in df_meta."""
-        filter = self.df_meta['iid'].isin(iids)
-        for (col, min, max) in filters:
-            filter &= self.df_meta[col].between(min, max)
-        return set(self.df_meta[filter]['iid'])
-
     def filter_time(self, iids, min_date:int, max_date:int, strict:bool=False) -> set[str]:
-        """Filter the iids whose dating correspond to the given time_range, based on the metadata.
+        """Filter the subset of iids whose dating correspond to the given time_range, based on the metadata.
         If strict, the mean date must be within the range.
         If not strict, the dating range must overlap with the given time_range."""
         dates = self.df_meta[['iid', 'date']][self.df_meta['iid'].isin(iids)]
@@ -126,13 +115,13 @@ class DataHandler:
     def get_iids_site(self, site:str) -> set[str]:
         """Returns the iids corresponding to a given site, based on the metadata."""
         return set(self.df_meta[self.df_meta['iid'].str.startswith(site)]['iid'])
-    
+
     def get_ibd_iids(self, iids1, iids2=None, filter_rel=("sum_IBD>12", 0, 100)) -> tuple[int, pd.DataFrame]:
         """Returns the IBD segments between two sets of iids, and the number of individual pairs concerned."""
         if iids2 is None:
             iids2 = iids1
-        iids1 = self.get_iids_meta(iids1)
-        iids2 = self.get_iids_meta(iids2)
+        iids1 = self.filter_iids_meta(iids1)
+        iids2 = self.filter_iids_meta(iids2)
 
         subset = self.df_ibd_ind[
                 (self.df_ibd_ind['iid1'].isin(iids1) & self.df_ibd_ind['iid2'].isin(iids2)) |
@@ -152,7 +141,7 @@ class DataHandler:
             return len(iids1)*(len(iids1)-1)//2 - nb_removed, df_ibd_filtered
         else:
             return len(iids1)*len(iids2) - nb_removed, df_ibd_filtered
-    
+
     def get_ibd_sites(self, site1: str, site2: str|None=None, filter_rel=("sum_IBD>12", 0, 100)) -> tuple[int, pd.DataFrame]:
         """Returns the IBD segments between two sites, and the number of individual pairs concerned."""
         iids1 = self.get_iids_site(site1)
@@ -165,7 +154,7 @@ class DataHandler:
 #___________________________________________________
 # Summary Stats:
 #___________________________________________________
-def get_stats(df:DataFrame[DataIBD], L=[8,12,16,20], data_type:Literal['IBD', 'ROH']='IBD', save:None|str=None) -> DataFrame[DataIBDInd]:
+def create_stats(df:pd.DataFrame, L=[8,12,16,20], data_type:Literal['IBD', 'ROH']='IBD', save:None|str=None) -> pd.DataFrame:
     """Compute summary stats for the pandas df_RG"""
     if data_type == 'IBD':
         id_col = ['iid1', 'iid2']
@@ -182,6 +171,7 @@ def get_stats(df:DataFrame[DataIBD], L=[8,12,16,20], data_type:Literal['IBD', 'R
         df_stats[f"count_{data_type}>{n}"] = n_roh
         df_stats[f"sum_{data_type}>{n}"] = sum_roh
     df_stats = df_stats.fillna(0).reset_index()
+    df_stats = df_stats.sort_values(by=f"sum_{data_type}>{L[0]}", ascending=False)
     if save is not None:
         df_stats.to_csv(save, index=False)
-    return df_stats.sort_values(by=f"sum_{data_type}>{L[0]}", ascending=False) # type: ignore
+    return df_stats

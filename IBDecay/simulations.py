@@ -1,10 +1,9 @@
-from IBDecay.utils import chromosome_lengthsM_human, DataROH, DataIBD
+from IBDecay.utils import chromosome_lengthsM_human
 
-import os, sys
+import os
 import msprime, tskit
 import numpy as np
 import pandas as pd
-from pandera.typing.pandas import DataFrame
 from tqdm.auto import trange
 import warnings
 

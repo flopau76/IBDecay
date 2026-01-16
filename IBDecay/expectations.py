@@ -1,18 +1,17 @@
-from IBDecay.utils import chromosome_lengthsM_human, DataIBD
-from pandera.typing import DataFrame
+from IBDecay.utils import chromosome_lengthsM_human
 
 import numpy as np
+import pandas as pd
 
 class Calculator_ROH:
     """Class that calculates expected ROH
-    Note: all length must be morgans"""
-    #### Length of all Chromosomes (between first and last 1240k SNP)
+    Note: all length must be Morgans"""
 
     def __init__(self, chr_lgts=chromosome_lengthsM_human):
         self.chr_lgts = chr_lgts
 
     def _roh_density_Ne_chr(self, x, Ne: float, chr_l:float):
-        """Returns the expected RoH density for one chromosome, given an effective population size.
+        """Returns the expected RoH length distribution for one chromosome, given an effective population size.
         Args:
             x: Length [in Morgan] where to evaluate the density. Can be a float or an array of float
             Ne: effective population size
@@ -23,7 +22,7 @@ class Calculator_ROH:
         return (inside + edge) * (0<x) * (x<chr_l)
 
     def roh_density_Ne(self, x, Ne:float):
-        """"Returns the expected RoH density for the whole genome, given an effective population size.
+        """"Returns the expected RoH length distribution for the whole genome, given an effective population size.
         Args:
             x: Length [in Morgan] where to evaluate the density. Can be a float or an array of float
             Ne: effective population size"""
@@ -32,7 +31,7 @@ class Calculator_ROH:
         return pdf_full
 
     def _block_density_chr(self, x, chr_l:float, m:float):
-        """Returns the expected block density after m meiosis, for one chromosome.
+        """Returns the expected DNA length distribution after m meiosis, for one chromosome.
         Args:
             x: Length [in Morgan] where to evaluate the density. Can be a float or an array of float
             chr_l: length of the chromosome [in Morgan]
@@ -41,7 +40,7 @@ class Calculator_ROH:
         return pdf * (0<x) * (x<chr_l)
 
     def block_density(self, x, m:float):
-        """Returns the expected block density after m meiosis, for the whole genome.
+        """Returns the expected DNA length distribution after m meiosis, for the whole genome.
         Args:
             x: Length [in Morgan] where to evaluate the density. Can be a float or an array of float
             m: nb of meiosis -> average nb of recombination per Morgan"""
@@ -58,7 +57,7 @@ class Calculator_ROH:
         return c_prob
 
     def roh_density_pedigree(self, x, m:int, comm_anc:int=1):
-        """Returns the density of RoH blocks of length x [in Morgan], given a pedigree.
+        """Returns the density of RoH blocks of length x [in Morgan], given the relationship between the two parents.
         Args:
             x: Length [in Morgan] where to evaluate the density. Can be a float or an array of float
             m: nb of meiosis -> average nb of recombination per Morgan
@@ -70,7 +69,7 @@ class Calculator_ROH:
 class Calculator_IBD:
     """Class that calculates expected IBD amount over time"""
 
-    def __init__(self, bins, df_0:DataFrame[DataIBD], nb_pairs_0:float=1):
+    def __init__(self, bins, df_0:pd.DataFrame, nb_pairs_0:float=1):
         self.bins = bins
         self.bin_sizes = self.bins[1:] - self.bins[:-1]
         self.bin_mids = self.bins[:-1] + self.bin_sizes / 2
@@ -85,14 +84,14 @@ class Calculator_IBD:
 
     def ibd_decay_analytics(self, t_grid):
         """Computes the expected IBD amount for each bin, at different time points.
-        Returns an array of shape (len(t_grid), len(bins)-1)."""
+        Returns an array of shape (len(t_grid), len(self.bins)-1)."""
         t_grid = np.asarray(t_grid)
         return np.exp(-self.bin_mids * t_grid[:, np.newaxis]) * (self.x0 + (2*t_grid[:, np.newaxis] - t_grid[:, np.newaxis]**2 * self.bin_mids)*self._cumsum1 + t_grid[:, np.newaxis]**2 * self._cumsum2)
 
 class Estimator_IBD:
     """Class that estimates the time since common ancestor, given observed IBD lengths."""
 
-    def __init__(self, df_0:DataFrame[DataIBD], df_t:DataFrame[DataIBD], nb_pairs_0:float=1, nb_pairs_t:float=1,
+    def __init__(self, df_0:pd.DataFrame, df_t:pd.DataFrame, nb_pairs_0:float=1, nb_pairs_t:float=1,
                  bins_size=0.01, x_min=0.04, x_max=0.2, bins=None):
         """Initializes the estimator.
         All IBD segments longer than x_min are used to compute the expectations, but only those within [x_min, x_max] are used for the likelihood.

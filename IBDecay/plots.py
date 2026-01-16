@@ -1,12 +1,9 @@
-from IBDecay.utils import DataIBD, DataROH
 from IBDecay.expectations import Calculator_ROH, Calculator_IBD
 
-from pandera.typing import DataFrame
 from typing import Literal
 
 import numpy as np
 import pandas as pd
-import warnings
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 import matplotlib.patheffects as pe
@@ -60,7 +57,7 @@ class Plotter:
 #___________________________________________________
 # Histograms at population levels
 #___________________________________________________
-    def plot_histo(self, df_roh, nb_normalize: int|None=None, bins=np.arange(0.08, 0.30, 0.005), data_type:Literal['IBD', 'ROH']='IBD',
+    def plot_histo(self, df_ibd:pd.DataFrame, nb_normalize: int|None=None, bins=np.arange(0.08, 0.30, 0.005), data_type:Literal['IBD', 'ROH']='IBD',
             Ne:list[int]=[1500, 3000, 5000], pedigrees:list[Literal['FS', 'HS', 'AV', 'C1', 'C2', 'C3', 'PO']]=[]
         ):
         """Plot data histogram."""
@@ -69,12 +66,12 @@ class Plotter:
         # Get the number of individuals to normalize the plot
         if nb_normalize is None:
             if data_type == 'ROH':
-                nb_normalize = df_roh.groupby('iid').ngroups
+                nb_normalize = df_ibd.groupby('iid').ngroups
             else:
-                nb_normalize = df_roh.groupby(['iid1', 'iid2']).ngroups
+                nb_normalize = df_ibd.groupby(['iid1', 'iid2']).ngroups
 
         # Plot the actual histogram
-        ax.hist(df_roh['lengthM'], bins=bins, weights=np.full(len(df_roh), 1/nb_normalize), **self.kwargs_histo_one_site)
+        ax.hist(df_ibd['lengthM'], bins=bins, weights=np.full(len(df_ibd), 1/nb_normalize), **self.kwargs_histo_one_site)
 
         ax.set_xlim(bins[0], bins[-1]+(bins[1]-bins[0]))
         self._format_ax(ax, f"{data_type} segment length (cM)", f"Average nb of {data_type} segments per {'pair' if data_type=='IBD' else 'individual'}")
@@ -99,7 +96,7 @@ class Plotter:
             ax.tick_params(axis='both', which='major', labelsize=self.fontsize)
         return fig
 
-    def plot_ibd_two_sites(self, df_ibd1:DataFrame[DataIBD], df_ibd2:DataFrame[DataIBD], df_ibd_cross:DataFrame[DataIBD],
+    def plot_ibd_two_sites(self, df_ibd1:pd.DataFrame, df_ibd2:pd.DataFrame, df_ibd_cross:pd.DataFrame,
                             nb_pairs_1: int, nb_pairs_2: int, nb_pairs_cross: int, bins=np.arange(0.08, 0.30, 0.005),
                             Ne:list[int]=[1500, 3000, 5000], delta_t:list[int]=[],
                             name_site1:str="", name_site2:str=""
@@ -144,18 +141,18 @@ class Plotter:
 #___________________________________________________
 # Summary stats with one bar per inividual
 #___________________________________________________
-    def plot_summary_stats(self, df_stats, L=[8,12,16,20],
-                legend=True, x_ticks=True, y_ticks=True):
-        """Plot the distribution of one summary stats as a bar plot
-        df_stats can be obtained by running get_stats(df_RoH, L)
+    def plot_summary_stats(self, df_stats:pd.DataFrame, L=[8,12,16,20], L_colors=["#313695", "#abd9e9", "#fee090", "#d7191c"],
+                legend=True, x_ticks=True, y_ticks=True, ax=None):
+        """Plot the distribution of roh summary stats as a bar plot.
+        df_stats can be obtained by running create_stats(df_roh, L)
         L is the list of thresholds [in cM] considered (ie amount/length of roh >= x with x in L)"""
 
         # Plot settings
-        color = ["#313695", "#abd9e9", "#fee090", "#d7191c"]
-        ylabel = f"Sum of inferred ROH>{L[0]}cM [cM]"
+        ylabel = f"Cumulative lengthof ROH [cM]"
 
-        fig, ax = plt.subplots(figsize=self.figsize)
-        
+        if ax is None:
+            fig, ax = plt.subplots(figsize=self.figsize)
+
         # Prepare data
         data = 100 * df_stats[[f"sum_ROH>{n}" for n in L]].values
         if "iid" in df_stats.columns:
@@ -169,9 +166,10 @@ class Plotter:
 
         # Make plot for each bin
         for i in range(len(L)):
-            ax.bar(x, data[:,i], bottom=bottom[:,i], width=0.8, color=color[i], edgecolor="black", label=f"{L[i]}-{L[i+1]} cM" if i<len(L)-1 else f">{L[i]} cM")
+            ax.bar(x, data[:,i], bottom=bottom[:,i], width=0.8, color=L_colors[i], edgecolor="black", label=f"{L[i]}-{L[i+1]} cM" if i<len(L)-1 else f">{L[i]} cM")
 
-        ax.legend(title="Sum of ROH in", title_fontsize=self.fontsize, fontsize=self.fontsize, loc="upper right")
+        if legend:
+            ax.legend(title="Sum of ROH in", title_fontsize=self.fontsize, fontsize=self.fontsize, loc="upper right")
         if x_ticks:
             ax.set_xticks(x)
             ax.set_xticklabels(ids, fontsize=self.fontsize, rotation=270)
@@ -183,6 +181,15 @@ class Plotter:
             ax.tick_params(left = False, labelleft = False)
         ax.tick_params(labelsize=self.fontsize)
         ax.set_xlim(-1, len(ids))
+
+    def plot_summary_stats_panel(self, df_stats:List[pd.DataFrame], L=[8,12,16,20], L_colors=["#313695", "#abd9e9", "#fee090", "#d7191c"], titles:List[str]=[]):
+        fig, axes = plt.subplots(1, len(df_stats), figsize=(6*len(df_stats),6), sharey=True, width_ratios=[len(df) for df in df_stats])
+        for i, df in enumerate(df_stats):
+            title = titles[i] if i < len(titles) else ""
+            self.plot_summary_stats(df, L=L, L_colors=L_colors, legend=(i==len(df_stats)-1), x_ticks=True, y_ticks=(i==0), ax=axes[i])
+            axes[i].set_title(title, fontsize=self.fontsize)
+        return fig
+
 #___________________________________________________
 # Chromosome details at individual level
 #___________________________________________________
@@ -216,7 +223,7 @@ class Plotter:
             ax.vlines(x=np.full(len(df_RG), pos_x-0.25*width), ymin=df_RG[start_col], ymax=df_RG[end_col], lw=lw*0.45, color=c1)
             ax.vlines(x=np.full(len(df_RG2), pos_x+0.25*width), ymin=df_RG2[start_col], ymax=df_RG2[end_col], lw=lw*0.45, color=c2)
 
-    def plot_all_chromosomes(self, chrom_length:list[float], data_RG:DataFrame[DataROH], data_RG2:DataFrame[DataROH]|None=None,
+    def plot_all_chromosomes(self, chrom_length:list[float], df_roh:pd.DataFrame, df_roh2:pd.DataFrame|None=None,
                             unit:Literal['BP', 'Morgans']='Morgans',
                             legend:tuple|None=None,
                             savepath:str|None=None,
@@ -244,14 +251,14 @@ class Plotter:
         ax.set_ylabel(ylabel, fontsize=self.fontsize)
         ### Plot the chromosomes
         for ch, ch_len in enumerate(chrom_length, start=1):
-            df_ch = data_RG[data_RG['ch'] == ch]
-            if data_RG2 is not None:
-                df_ch2 = data_RG2[data_RG2['ch'] == ch]
+            df_ch = df_roh[df_roh['ch'] == ch]
+            if df_roh2 is not None:
+                df_ch2 = df_roh2[df_roh2['ch'] == ch]
             else:
                 df_ch2 = None
             self._plot_single_chromosome(ax, pos_x=ch, chrom_length=ch_len, df_RG=df_ch, df_RG2=df_ch2, unit=unit)
 
-        if data_RG2 is not None and legend is not None:
+        if df_roh2 is not None and legend is not None:
             legend_elements = [Patch(facecolor=c1, edgecolor=c1, label=legend[0]),
                             Patch(facecolor=c2, edgecolor=c2, label=legend[1])]
             ax.legend(handles=legend_elements, loc="lower center", ncols=2, fontsize=self.fontsize)
