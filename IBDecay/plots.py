@@ -1,4 +1,5 @@
-from IBDecay.expectations import Calculator_ROH, Calculator_IBD
+from IBDecay.expectations import Calculator
+from IBDecay.utils import chromosome_lengthsM_human
 
 from typing import Literal
 
@@ -11,19 +12,9 @@ from matplotlib import gridspec
 from matplotlib.patches import Patch
 from matplotlib.axes import Axes
 
-# inbreeding defined by (nb of meiosis, nb of common ancestors)
-pedigree_dict = {
-    'FS': (4, 2, 'Full Siblings'),
-    'HS': (4, 1, 'Half Siblings'),
-    'AV': (5, 2, 'Aunt/Nephew'),
-    'C1': (6, 2, 'First Cousins'),
-    'C2': (8, 2, 'Second Cousins'),
-    'C3': (10, 2, 'Third Cousins'),
-    'PO': (3, 1, 'Parent/Offspring')
-}
-
 class Plotter:
-    def __init__(self):
+    def __init__(self, chr_lgts=chromosome_lengthsM_human):
+        self.chr_lgts = chr_lgts
 
         # colors for expected lines
         self.Ne_colors = ["#fde725", "#5ec962", "#21918c", "#3b528b", "#440154", "k"]
@@ -40,61 +31,51 @@ class Plotter:
         self.figsize = (6,6)
         self.xlim = None
         self.ylim = None
-        self.yscale = 'log'
         self.fontsize = 12
-
-
-    def _format_ax(self, ax, xlabel:str, ylabel:str):
-        # Replace the original x-axis in Morgans by one in cM
-        ax.get_xaxis().set_visible(False)
-        new_ax = ax.secondary_xaxis('bottom', functions=(lambda x: x*100, lambda x: x/100))
-        new_ax.set_xlabel(xlabel, fontsize=self.fontsize)
-        ax.set_ylabel(ylabel, fontsize=self.fontsize)
-        plt.yscale(self.yscale)
-        ax.set_xlim(self.xlim)
-        ax.set_ylim(self.ylim)
 
 #___________________________________________________
 # Histograms at population levels
 #___________________________________________________
-    def plot_histo(self, df_ibd:pd.DataFrame, nb_normalize: int|None=None, bins=np.arange(0.08, 0.30, 0.005), data_type:Literal['IBD', 'ROH']='IBD',
-            Ne:list[int]=[1500, 3000, 5000], pedigrees:list[Literal['FS', 'HS', 'AV', 'C1', 'C2', 'C3', 'PO']]=[]
+    def plot_histo(self, df_data:pd.DataFrame, nb_normalize: int=1, bins=np.arange(0.08, 0.30, 0.005),
+            data_type:Literal['IBD', 'ROH']='IBD', Ne:list[int]=[1500, 3000, 5000],
+            ax:Axes|None=None, figsize:tuple=(6,6), xlabel:str|None=None, ylabel:str|None=None
         ):
-        """Plot data histogram."""
-        fig, ax = plt.subplots(figsize=self.figsize)
+        """Plot data histogram.
+        Args:
+            df_data: Dataframe containing the data to plot. Must contain a column 'lengthM'.
+            nb_normalize: Number of pairs (for IBD) or individuals (for ROH) to normalize the histogram.
+            bins: Bins to use for the histogram.
+            data_type: 'IBD' or 'ROH'.
+            Ne: List of effective population sizes to plot the expected lines for."""
+        if ax is not None:
+            fig = ax.get_figure()
+        else:
+            fig, ax = plt.subplots(figsize=figsize)
 
-        # Get the number of individuals to normalize the plot
-        if nb_normalize is None:
-            if data_type == 'ROH':
-                nb_normalize = df_ibd.groupby('iid').ngroups
-            else:
-                nb_normalize = df_ibd.groupby(['iid1', 'iid2']).ngroups
+        # Format the plot
+        if xlabel is None:
+            xlabel = f"{data_type} segment length (M)"
+        if ylabel is None:
+            ylabel = f"Average nb of {data_type} segments per {'pair' if data_type=='IBD' else 'individual'}"
+        ax.set_xlabel(xlabel, fontsize=self.fontsize)
+        ax.set_ylabel(ylabel, fontsize=self.fontsize)
+        ax.set_xlim(bins[0], bins[-1]+(bins[1]-bins[0]))
+        ax.set_yscale('log')
 
         # Plot the actual histogram
-        ax.hist(df_ibd['lengthM'], bins=bins, weights=np.full(len(df_ibd), 1/nb_normalize), **self.kwargs_histo_one_site)
-
-        ax.set_xlim(bins[0], bins[-1]+(bins[1]-bins[0]))
-        self._format_ax(ax, f"{data_type} segment length (cM)", f"Average nb of {data_type} segments per {'pair' if data_type=='IBD' else 'individual'}")
+        ax.hist(df_data['lengthM'], bins=bins, weights=np.full(len(df_data), 1/nb_normalize), **self.kwargs_histo_one_site)
 
         # Plot the expected histogram for a constant Ne
-        calculator = Calculator_ROH()
-        bin_mids = bins[:-1] + (bins[1:] - bins[:-1]) / 2
-        bin_width = bins[1:] - bins[:-1]
+        calculator = Calculator(self.chr_lgts)
+        segment_density_func = calculator.ibd_density_Ne if data_type=='IBD' else calculator.roh_density_Ne
+        x = np.linspace(bins[0], bins[-1], 1000)
+        bin_width = bins[1] - bins[0]
         for N, c in zip(Ne, self.Ne_colors):
-            y = calculator.roh_density_Ne(bin_mids, N) * bin_width * (1 if data_type=='ROH' else 4)
-            ax.plot(bin_mids, y, color=c, linestyle='dashed', scaley=False)
-            ax.text(bin_mids[0], y[0], f"Ne={N}", color='black', fontsize=self.fontsize)
-        # Plot the expected histogram for a pedigree
-        if data_type == 'ROH' and len(pedigrees) > 0:
-            for ped, c in zip(pedigrees, self.pedigree_colors):
-                m, comm_anc, ped_name = pedigree_dict[ped]
-                y = calculator.roh_density_pedigree(bin_mids, m, comm_anc) * bin_width
-                ax.plot(bin_mids, y, color=c, linestyle='solid', label=ped_name, scaley=False)
-            # add legend
-            leg = ax.legend(fontsize=self.fontsize)
-            leg.set_title("Parents being...", prop = {'size':self.fontsize})
-            ax.tick_params(axis='both', which='major', labelsize=self.fontsize)
-        return fig
+            y = bin_width * segment_density_func(x, N)
+            ax.plot(x, y, color=c, linestyle='dashed', scaley=False)
+            ax.text(x[100], y[100], f"Ne={int(N)}", color='black', fontsize=self.fontsize)
+
+        return fig, ax
 
     def plot_ibd_two_sites(self, df_ibd1:pd.DataFrame, df_ibd2:pd.DataFrame, df_ibd_cross:pd.DataFrame,
                             nb_pairs_1: int, nb_pairs_2: int, nb_pairs_cross: int, bins=np.arange(0.08, 0.30, 0.005),
@@ -123,7 +104,7 @@ class Plotter:
 
         ### Expectations
         # IBD decay
-        calculator_ibd = Calculator_IBD(bins=bins, df_0=df_ibd1)
+        calculator = Calculator_IBD(bins=bins, df_0=df_ibd1)
         bin_mids = bins[:-1] + (bins[1:] - bins[:-1]) / 2
         bin_size = bins[1:] - bins[:-1]
         xdt = calculator_ibd.ibd_decay_analytics(delta_t) / nb_pairs_1
@@ -223,7 +204,7 @@ class Plotter:
             ax.vlines(x=np.full(len(df_RG), pos_x-0.25*width), ymin=df_RG[start_col], ymax=df_RG[end_col], lw=lw*0.45, color=c1)
             ax.vlines(x=np.full(len(df_RG2), pos_x+0.25*width), ymin=df_RG2[start_col], ymax=df_RG2[end_col], lw=lw*0.45, color=c2)
 
-    def plot_all_chromosomes(self, chrom_length:list[float], df_roh:pd.DataFrame, df_roh2:pd.DataFrame|None=None,
+    def plot_all_chromosomes(self, df_roh:pd.DataFrame, df_roh2:pd.DataFrame|None=None,
                             unit:Literal['BP', 'Morgans']='Morgans',
                             legend:tuple|None=None,
                             savepath:str|None=None,
@@ -234,8 +215,8 @@ class Plotter:
         c1 = "maroon"
         c2 = "saddlebrown"
 
-        xlim = (0.5, len(chrom_length) + 0.5)
-        ylim = (-0.05 * np.max(chrom_length), 1.05 * np.max(chrom_length))
+        xlim = (0.5, len(self.chr_lgts) + 0.5)
+        ylim = (-0.05 * np.max(self.chr_lgts), 1.05 * np.max(self.chr_lgts))
 
         fig, ax = plt.subplots(figsize=self.figsize)
 
@@ -243,14 +224,14 @@ class Plotter:
         ax.set_xlim(xlim)
         ax.set_ylim(ylim)
         ### Tick the X Axis
-        rang = np.arange(1,len(chrom_length)+1)
+        rang = np.arange(1,len(self.chr_lgts)+1)
         ax.set_xticks(rang)
         ax.set_xticklabels(rang, fontsize=self.fontsize)
         ax.set_xlabel("Chromosome", fontsize=self.fontsize)
         ylabel = "Position (bp)" if unit=="BP" else "Position (Morgan)"
         ax.set_ylabel(ylabel, fontsize=self.fontsize)
         ### Plot the chromosomes
-        for ch, ch_len in enumerate(chrom_length, start=1):
+        for ch, ch_len in enumerate(self.chr_lgts, start=1):
             df_ch = df_roh[df_roh['ch'] == ch]
             if df_roh2 is not None:
                 df_ch2 = df_roh2[df_roh2['ch'] == ch]
@@ -269,7 +250,7 @@ class Plotter:
 #___________________________________________________
 # Detail of results for one individual on one chromosome
 #___________________________________________________
-    def plot_chromosome_detail(self, data:DataFrame[DataROH]):
+    def plot_chromosome_detail(self, data:pd.DataFrame):
         """
         """
         # Plot settings
