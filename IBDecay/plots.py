@@ -242,70 +242,70 @@ class Plotter:
 #___________________________________________________
 # Detail of results for one individual on one chromosome
 #___________________________________________________
-def plot_chromosome_detail(self, df_roh:pd.DataFrame, df_roh_2:pd.DataFrame|None=None, df_het:pd.DataFrame|None=None, unit:Litteral['M', 'BP']='BP',
-                            chrom:int|List|None=None, chrom_length:List|int|None=None, max_points:int|None=1e4,
-                            figsize:tuple|None=None):
-    """Plot ROH segments and heterozygosity along one or several chromosomes.
-    Args:
-        df_roh: dataframe containing ROH segments to plot. Must contain columns 'ch', 'StartBP', 'EndBP', 'StartM', 'EndM'
-        df_roh_2: optional second dataframe to plot for comparison
-        df_het: optional dataframe containing heterozygosity information along the chromosome. Must contain columns 'ch', 'posBP', 'posM', 'het'
-        unit: whether to plot positions in base pairs ('BP') or Morgans ('M')
-        chrom: which chromosome(s) to plot. If None, plot all chromosomes present in df_roh.
-        chrom_length: length of the chromosome(s) to plot. If None, use the maximum end position in df_roh.
-        max_points: maximum number of points to plot for heterozygosity (if df_het is provided). If there are more points than this, a random subset will be plotted."""
-    # Plot settings
-    kwargs_roh_1 = {'color':'maroon', 'alpha':1, 'linewidth':6}
-    kwargs_roh_2 = {'color':'saddlebrown', 'alpha': 1, 'linewidth':6}
-    kwargs_het = {'color':'blue', 'alpha' : 0.1, 's' : 3}
-    m = MarkerStyle('o', fillstyle='none')
+    def plot_chromosome_detail(self, df_roh:pd.DataFrame, df_roh_2:pd.DataFrame|None=None, df_het:pd.DataFrame|None=None, unit:Litteral['M', 'BP']='BP',
+                                chrom:int|List|None=None, chrom_length:List|int|None=None, max_points:int|None=1e4,
+                                figsize:tuple|None=None, fig=None):
+        """Plot ROH segments and heterozygosity along one or several chromosomes.
+        Args:
+            df_roh: dataframe containing ROH segments to plot. Must contain columns 'ch', 'StartBP', 'EndBP', 'StartM', 'EndM'
+            df_roh_2: optional second dataframe to plot for comparison
+            df_het: optional dataframe containing heterozygosity information along the chromosome. Must contain columns 'ch', 'posBP', 'posM', 'het'
+            unit: whether to plot positions in base pairs ('BP') or Morgans ('M')
+            chrom: which chromosome(s) to plot. If None, plot all chromosomes present in df_roh.
+            chrom_length: length of the chromosome(s) to plot. If None, use the maximum end position in df_roh.
+            max_points: maximum number of points to plot for heterozygosity (if df_het is provided). If there are more points than this, a random subset will be plotted."""
+        # Plot settings
+        kwargs_roh_1 = {'color':'maroon', 'alpha':1, 'linewidth':6}
+        kwargs_roh_2 = {'color':'saddlebrown', 'alpha': 1, 'linewidth':6}
+        kwargs_het = {'color':'blue', 'alpha' : 0.01, 's' : 3}
+        m = MarkerStyle('o', fillstyle='none')
 
-    if chrom is None:
-        chrom = df_roh['ch'].unique()
-    elif isinstance(chrom, int):
-        chrom = [chrom]
+        if chrom is None:
+            chrom = df_roh['ch'].unique()
+        elif isinstance(chrom, int):
+            chrom = [chrom]
 
-    fig, axes = plt.subplots(len(chrom), figsize=figsize, layout="constrained")
+        fig, axes = plt.subplots(len(chrom), figsize=figsize, layout="constrained")
 
-    for i, chr in enumerate(chrom):
-        df_roh_ch = df_roh[df_roh['ch']==chr]
-        if df_roh_2 is not None:
-            df_roh_2_ch = df_roh_2[df_roh_2['ch']==chr]
-        if df_het is not None:
-            df_het_ch = df_het[df_het['ch']==chr]
+        for i, chr in enumerate(chrom):
+            df_roh_ch = df_roh[df_roh['ch']==chr]
+            if df_roh_2 is not None:
+                df_roh_2_ch = df_roh_2[df_roh_2['ch']==chr]
+            if df_het is not None:
+                df_het_ch = df_het[df_het['ch']==chr]
 
-        ax = axes[i] if len(chrom) > 1 else axes
-        # Plot SNP heterozygosity if provided
-        if df_het is not None and len(df_het) > 0:
-            if max_points is not None:
-                rng = np.random.default_rng()
-                subset = rng.choice(df_het_ch.index, size=int(min(len(df_het_ch.index), max_points)), replace=False)
-                df_het_ch = df_het_ch.loc[subset]
-            ax.scatter(df_het_ch[f'pos{unit}'], df_het_ch['het'].astype(int), marker=m, **kwargs_het)
+            ax = axes[i] if len(chrom) > 1 else axes
+            # Plot SNP heterozygosity if provided
+            if df_het is not None and len(df_het) > 0:
+                if max_points is not None:
+                    rng = np.random.default_rng()
+                    subset = rng.choice(df_het_ch.index, size=int(min(len(df_het_ch.index), max_points)), replace=False)
+                    df_het_ch = df_het_ch.loc[subset]
+                ax.scatter(df_het_ch[f'pos{unit}'], df_het_ch['het'].astype(int), marker=m, **kwargs_het)
 
-        # Plot ROH segments
-        cmap = plt.get_cmap('Dark2').colors
-        color_list = [cmap[i % len(cmap)] for i in range(len(df_roh_ch))]
-        ax.hlines(xmin=df_roh_ch[f'Start{unit}'], xmax=df_roh_ch[f'End{unit}'],
-                    y=[1.2]*len(df_roh_ch.index),**kwargs_roh_1)    # , color=color_list, linewidth=6
-        if df_roh_2 is not None:
-            ax.hlines(xmin=df_roh_2_ch[f'Start{unit}'], xmax=df_roh_2_ch[f'End{unit}'], y=[1.4]*len(df_roh_2_ch.index),**kwargs_roh_2)
+            # Plot ROH segments
+            cmap = plt.get_cmap('Dark2').colors
+            color_list = [cmap[i % len(cmap)] for i in range(len(df_roh_ch))]
+            ax.hlines(xmin=df_roh_ch[f'Start{unit}'], xmax=df_roh_ch[f'End{unit}'],
+                        y=[1.2]*len(df_roh_ch.index),**kwargs_roh_1)    # , color=color_list, linewidth=6
+            if df_roh_2 is not None:
+                ax.hlines(xmin=df_roh_2_ch[f'Start{unit}'], xmax=df_roh_2_ch[f'End{unit}'], y=[1.4]*len(df_roh_2_ch.index),**kwargs_roh_2)
 
-        # Adjust x_axis
-        if chrom_length is not None:
-            if isinstance(chrom_length, list):
-                xmax = chrom_length[chr-1]
-            else:
-                xmax = chrom_length
-            ax.set_xlim(0, xmax)
+            # Adjust x_axis
+            if chrom_length is not None:
+                if isinstance(chrom_length, list):
+                    xmax = chrom_length[chr-1]
+                else:
+                    xmax = chrom_length
+                ax.set_xlim(0, xmax)
 
-        ax.set_title(f"Chromosome {chr}")
-        ax.set_yticks([0, 1])
-        ax.tick_params(axis='y', which='minor', left=False, right=False)
+            ax.set_title(f"Chromosome {chr}")
+            ax.set_yticks([0, 1])
+            ax.tick_params(axis='y', which='minor', left=False, right=False)
 
-    ax.set_xlabel(f"Genetic position ({unit})")
+        ax.set_xlabel(f"Genetic position ({unit})")
 
-    return fig, axes
+        return fig, axes
 
 #___________________________________________________
 # Heatmap of log-likelihood

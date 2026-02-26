@@ -101,8 +101,6 @@ class Calculator:
         pdf = self.block_density(x, nb_meiosis)
         return p_coal * pdf
 
-    # TODO: ibd_density_pedigree
-
     def ibd_decay(self, t:np.ndarray, admix:np.ndarray, bins:list, lengths_0:np.ndarray, nb_pairs_0:float):
         """"Returns the expected IBD length distribution, after a certain number of generations.
         Args:
