@@ -183,7 +183,7 @@ class Plotter:
         # Convert width in axis coordinate to linewith in figure coordinate (nb of points)
         fig = ax.get_figure()
         length = fig.bbox_inches.width * ax.get_position().width * 72    # 72=nb of points/inch
-        lw = width * length / np.diff(ax.get_xlim())
+        lw = width * length / np.diff(ax.get_xlim())[0]
 
         ### Plot chromosome outline
         ax.plot([pos_x, pos_x], [0, chrom_length], lw = lw, color="lightgray",
@@ -264,7 +264,12 @@ class Plotter:
             chrom = df_roh['ch'].unique()
         elif isinstance(chrom, int):
             chrom = [chrom]
+        if chrom is None:
+            chrom = df_roh['ch'].unique()
+        elif isinstance(chrom, int):
+            chrom = [chrom]
 
+        fig, axes = plt.subplots(len(chrom), figsize=figsize, layout="constrained")
         fig, axes = plt.subplots(len(chrom), figsize=figsize, layout="constrained")
 
         for i, chr in enumerate(chrom):
