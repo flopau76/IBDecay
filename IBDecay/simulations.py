@@ -1,5 +1,7 @@
 from IBDecay.utils import chromosome_lengthsM_human
 
+from typing import Literal
+
 import os
 import msprime, tskit
 import numpy as np
@@ -43,7 +45,7 @@ class Simulator:
         lengths = ibd.right - ibd.left
         return pd.DataFrame({"lengthM": lengths, "tmrca": tmrca})
 
-    def simulate_roh(self, n_sim:int=10, save_path=None) -> DataFrame[DataROH]|None:
+    def simulate_roh(self, n_sim:int=10, save_path=None) -> pd.DataFrame|None:
         """Run n_sim simulations of ROH within a diploïd individual"""
 
         if save_path is not None:
@@ -74,7 +76,7 @@ class Simulator:
         else:
             return None
 
-    def simulate_ibd_decay(self, t1:float=0, t2:float=0, n_sim:int=10, ploidy:int=2, samples=None, save_path=None) -> DataFrame[DataIBD]|None:
+    def simulate_ibd_decay(self, t1:float=0, t2:float=0, n_sim:int=10, ploidy:int=2, samples=None, save_path=None) -> pd.DataFrame|None:
         """Run n_sim simulations of IBD between two individuals from different time points t1 and t2 (generations ago).
         In total: n_sim * ploidy^2 pairs are compared"""
 

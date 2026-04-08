@@ -5,7 +5,7 @@
 import pandas as pd
 import numpy as np
 
-from typing import TypedDict
+from typing import TypedDict, Literal
 
 chromosome_lengthsM_human = [2.8426, 2.688187, 2.232549, 2.14201, 2.040477, 1.917145, 1.871491, 1.680018, 
             1.661367, 1.8090949, 1.5821669, 1.745901, 1.2551429, 1.1859521, 1.413411, 
@@ -21,63 +21,6 @@ pedigree_dict = {
     'C3': (10, 2, 'Third Cousins'),
     'PO': (3, 1, 'Parent/Offspring')
 }
-
-#___________________________________________________
-# Data Format
-#___________________________________________________
-
-class DataROH_Schema(TypedDict):
-    iid: object
-    Start: int
-    End: int
-    StartM: float
-    EndM: float
-    length: int
-    lengthM: float
-    ch: int
-
-class DataIBD_Schema(TypedDict):
-    iid1: object
-    iid2: object
-    Start: int
-    End: int
-    StartM: float
-    EndM: float
-    length: int
-    lengthM: float
-    ch: int
-    SNP_Dens: float     # optionnal
-
-class DataIBDStats_Schema(TypedDict):
-    iid1: object
-    iid2: object
-    max_IBD: float
-    sum_IBD_8: float
-    n_IBD_8: int
-    sum_IBD_12: float
-    n_IBD_12: int
-    sum_IBD_16: float
-    n_IBD_16: int
-    sum_IBD_20: float
-    n_IBD_20: int
-
-class DataMetaSchema(TypedDict):
-    Master_ID: object
-    iid: object
-    frac_gp: float
-    frac_missing: float
-    frac_het: float
-    n_cov_snp: int
-    Archaeological_ID: object
-    Projects: object
-    Locality: object
-    Province: object
-    Country: object
-    Latitude: float
-    Longitude: float
-    date: object
-    date_type: object
-    imputation_type: object
 
 #___________________________________________________
 # Data manipulation
@@ -166,8 +109,8 @@ def create_stats(df:pd.DataFrame, L=[8,12,16,20], data_type:Literal['IBD', 'ROH'
     for n in L:
         groups = df.loc[df['lengthM'] > 0.01*n].groupby(id_col, observed=False)
         n_roh = groups.size()
-        sum_roh = groups["lengthM"].sum()
-        df_stats[f"count_{data_type}>{n}"] = n_roh
+        sum_roh = groups["lengthM"].sum() * 100
+        df_stats[f"n_{data_type}>{n}"] = n_roh
         df_stats[f"sum_{data_type}>{n}"] = sum_roh
     df_stats = df_stats.fillna(0).reset_index()
     df_stats = df_stats.sort_values(by=f"sum_{data_type}>{L[0]}", ascending=False)

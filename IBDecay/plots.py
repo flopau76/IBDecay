@@ -1,7 +1,7 @@
 from IBDecay.expectations import Calculator
 from IBDecay.utils import chromosome_lengthsM_human
 
-from typing import Literal
+from typing import Literal, List
 
 import numpy as np
 import pandas as pd
@@ -68,44 +68,8 @@ class Plotter:
             ax.text(x[100], y[100], f"Ne={int(N)}", color='black')
 
         return fig, ax
-
-    # TODO
-    def _plot_ibd_two_sites(self, df_ibd1:pd.DataFrame, df_ibd2:pd.DataFrame, df_ibd_cross:pd.DataFrame,
-                            nb_pairs_1: int, nb_pairs_2: int, nb_pairs_cross: int, bins=np.arange(0.08, 0.30, 0.005),
-                            Ne:list[int]=[1500, 3000, 5000], delta_t:list[int]=[],
-                            name_site1:str="", name_site2:str=""
-        ):
-        """Plot IBD Histogram comparing two sites."""
-        fig, ax = plt.subplots()
-
-        # Plot the actual histogram
-        ax.hist(df_ibd1['lengthM'], bins=bins, weights=np.full(len(df_ibd1), 1/nb_pairs_1), label=name_site1, **self.kwargs_histo_two_site["site_a"])
-        ax.hist(df_ibd2['lengthM'], bins=bins, weights=np.full(len(df_ibd2), 1/nb_pairs_2), label=name_site2, **self.kwargs_histo_two_site["site_b"])
-        ax.hist(df_ibd_cross['lengthM'], bins=bins, weights=np.full(len(df_ibd_cross), 1/nb_pairs_cross), label="between", **self.kwargs_histo_two_site["cross"])
-
-        plt.legend(loc='upper right', title="IBD Sharing")
-        ax.set_xlim(bins[0], bins[-1]+(bins[1]-bins[0]))
-        self._format_ax(ax, 'IBD segment length (cM)', 'Average nb of IBD segments per pair')
-
-        ### Expectations
-        # IBD decay
-        calculator = Calculator_IBD(bins=bins, df_0=df_ibd1)
-        bin_mids = bins[:-1] + (bins[1:] - bins[:-1]) / 2
-        bin_size = bins[1:] - bins[:-1]
-        xdt = calculator_ibd.ibd_decay_analytics(delta_t) / nb_pairs_1
-        for i, (dt, c) in enumerate(zip(delta_t, self.delta_t_colors)):
-            ax.plot(bin_mids, xdt[i, :], color=c, linestyle='solid', scaley=False)
-            ax.text(bin_mids[1], xdt[i, 1], f"dt={dt}", color='black', rotation=-40, rotation_mode='anchor')
-        # Constant Ne
-        calculator_roh = Calculator_ROH()
-        for N, c in zip(Ne, self.Ne_colors):
-            y = 4 * calculator_roh.roh_density_Ne(bin_mids, N) * bin_size
-            ax.plot(bin_mids, y, color=c, linestyle='dashed', scaley=False)
-            ax.text(bin_mids[0], y[0], f"Ne={N}", color='black')
-
-        return fig
 #___________________________________________________
-# Summary stats with one bar per inividual
+# Summary stats with one bar per individual
 #___________________________________________________
     def plot_summary_stats(self, df_stats:pd.DataFrame, L=[8,12,16,20], L_colors=["#313695", "#abd9e9", "#fee090", "#d7191c"],
                 legend:bool=True, x_ticks:None|str=None, y_ticks:bool=False, ax=None):
@@ -124,7 +88,7 @@ class Plotter:
 
         # Prepare data
         df_stats = df_stats.sort_values(f"sum_ROH>{L[0]}", ascending=False)
-        data = 100 * df_stats[[f"sum_ROH>{n}" for n in L]].values
+        data = df_stats[[f"sum_ROH>{n}" for n in L]].values
         x = np.arange(len(df_stats))
         bottom = np.zeros((len(df_stats), len(L)))
         for i in range(1,len(L)):
@@ -242,76 +206,91 @@ class Plotter:
 #___________________________________________________
 # Detail of results for one individual on one chromosome
 #___________________________________________________
-    def plot_chromosome_detail(self, df_roh:pd.DataFrame, df_roh_2:pd.DataFrame|None=None, df_het:pd.DataFrame|None=None, unit:Litteral['M', 'BP']='BP',
-                                chrom:int|List|None=None, chrom_length:List|int|None=None, max_points:int|None=1e4,
-                                figsize:tuple|None=None, fig=None):
-        """Plot ROH segments and heterozygosity along one or several chromosomes.
-        Args:
-            df_roh: dataframe containing ROH segments to plot. Must contain columns 'ch', 'StartBP', 'EndBP', 'StartM', 'EndM'
-            df_roh_2: optional second dataframe to plot for comparison
-            df_het: optional dataframe containing heterozygosity information along the chromosome. Must contain columns 'ch', 'posBP', 'posM', 'het'
-            unit: whether to plot positions in base pairs ('BP') or Morgans ('M')
-            chrom: which chromosome(s) to plot. If None, plot all chromosomes present in df_roh.
-            chrom_length: length of the chromosome(s) to plot. If None, use the maximum end position in df_roh.
-            max_points: maximum number of points to plot for heterozygosity (if df_het is provided). If there are more points than this, a random subset will be plotted."""
+
+    def plot_chromosome_detail(self, df_roh:pd.DataFrame|None=None, df_roh_2:pd.DataFrame|None=None, df_het:pd.DataFrame|None=None,
+                                unit:Literal['M', 'BP']='BP',
+                                chrom:int|list|None=None,
+                                max_points:int|None=10000,
+                                window_size:float|None=10000, step_size:float|None=5000,
+                                figsize:tuple|None=None):
+        """Plot the given ROH, along with the heterozygosity. If given two dataframes, plot them side by side for comparison.
+        """
+        
         # Plot settings
         kwargs_roh_1 = {'color':'maroon', 'alpha':1, 'linewidth':6}
         kwargs_roh_2 = {'color':'saddlebrown', 'alpha': 1, 'linewidth':6}
         kwargs_het = {'color':'blue', 'alpha' : 0.01, 's' : 3}
         m = MarkerStyle('o', fillstyle='none')
 
+        if df_roh is None and df_het is None:
+            raise ValueError("At least one of df_roh or df_het must be provided.")
+
         if chrom is None:
-            chrom = df_roh['ch'].unique()
+            if df_roh is not None:
+                chrom = df_roh['ch'].unique()
+            else:
+                chrom = df_het['ch'].unique()
         elif isinstance(chrom, int):
             chrom = [chrom]
-        if chrom is None:
-            chrom = df_roh['ch'].unique()
-        elif isinstance(chrom, int):
-            chrom = [chrom]
 
+        # Create figure
+        if figsize is None:
+            figsize = plt.rcParams["figure.figsize"]
         fig, axes = plt.subplots(len(chrom), figsize=figsize, layout="constrained")
-        fig, axes = plt.subplots(len(chrom), figsize=figsize, layout="constrained")
+        if len(chrom) == 1:
+            axes = [axes]
 
-        for i, chr in enumerate(chrom):
-            df_roh_ch = df_roh[df_roh['ch']==chr]
-            if df_roh_2 is not None:
-                df_roh_2_ch = df_roh_2[df_roh_2['ch']==chr]
-            if df_het is not None:
-                df_het_ch = df_het[df_het['ch']==chr]
-
-            ax = axes[i] if len(chrom) > 1 else axes
-            # Plot SNP heterozygosity if provided
+        for chr, ax in zip(chrom, axes):
+            print(f"Plotting chromosome {chr}")
+            # Plot heterozygosity if provided
             if df_het is not None and len(df_het) > 0:
+                df_het_ch: pd.DataFrame = df_het[df_het['ch']==chr]
+
+                # Scatter heterozygous SNP
                 if max_points is not None:
                     rng = np.random.default_rng()
                     subset = rng.choice(df_het_ch.index, size=int(min(len(df_het_ch.index), max_points)), replace=False)
                     df_het_ch = df_het_ch.loc[subset]
                 ax.scatter(df_het_ch[f'pos{unit}'], df_het_ch['het'].astype(int), marker=m, **kwargs_het)
 
+                # Add percentage of heterozygous SNPs over a slinding window
+                starts = np.arange(0, df_het_ch[f"pos{unit}"].max()+step_size, step_size)
+                het_percentage = []
+                for start in starts:
+                    mask = (df_het_ch[f"pos{unit}"] >= start) & (df_het_ch[f"pos{unit}"] < start+window_size)
+                    if mask.sum() > 0:
+                        het_percentage.append(df_het_ch.loc[mask, "het"].mean())
+                    else:
+                        het_percentage.append(0)
+                ax.plot(starts+window_size/2, het_percentage, color='black', linewidth=0.5)
+
             # Plot ROH segments
-            cmap = plt.get_cmap('Dark2').colors
-            color_list = [cmap[i % len(cmap)] for i in range(len(df_roh_ch))]
-            ax.hlines(xmin=df_roh_ch[f'Start{unit}'], xmax=df_roh_ch[f'End{unit}'],
-                        y=[1.2]*len(df_roh_ch.index),**kwargs_roh_1)    # , color=color_list, linewidth=6
+            if df_roh is not None:
+                df_roh_ch = df_roh[df_roh['ch']==chr]
+                ax.hlines(xmin=df_roh_ch[f'Start{unit}'], xmax=df_roh_ch[f'End{unit}'],
+                          y=[1.2]*len(df_roh_ch.index),**kwargs_roh_1)
             if df_roh_2 is not None:
-                ax.hlines(xmin=df_roh_2_ch[f'Start{unit}'], xmax=df_roh_2_ch[f'End{unit}'], y=[1.4]*len(df_roh_2_ch.index),**kwargs_roh_2)
+                df_roh_2_ch = df_roh_2[df_roh_2['ch']==chr]
+                ax.hlines(xmin=df_roh_2_ch[f'Start{unit}'], xmax=df_roh_2_ch[f'End{unit}'],
+                          y=[1.4]*len(df_roh_2_ch.index),**kwargs_roh_2)
 
             # Adjust x_axis
-            if chrom_length is not None:
-                if isinstance(chrom_length, list):
-                    xmax = chrom_length[chr-1]
-                else:
-                    xmax = chrom_length
-                ax.set_xlim(0, xmax)
+            # if chrom_length is not None:
+            #     if isinstance(chrom_length, list):
+            #         xmax = chrom_length[chr-1]
+            #     else:
+            #         xmax = chrom_length
+            #     ax.set_xlim(0, xmax)
 
-            ax.set_title(f"Chromosome {chr}")
+            ax.set_title(f"chromosome {chr}")
             ax.set_yticks([0, 1])
             ax.tick_params(axis='y', which='minor', left=False, right=False)
 
         ax.set_xlabel(f"Genetic position ({unit})")
+        ax.set_ylabel("  Heterozygosity", loc='bottom', labelpad=-40)
+        # ax.set_yticks([1.2, 1.4], labels=["post-p. ROH", "raw ROH"], rotation=0, minor=True)
 
         return fig, axes
-
 #___________________________________________________
 # Heatmap of log-likelihood
 #___________________________________________________
