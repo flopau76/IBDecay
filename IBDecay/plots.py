@@ -1,7 +1,7 @@
 from IBDecay.expectations import Calculator
 from IBDecay.utils import chromosome_lengthsM_human
 
-from typing import Literal, List
+from typing import Literal, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -24,8 +24,8 @@ class Plotter:
 
         # histogramm colors
         self.kwargs_histo_one_site = {"color": "sandybrown", "edgecolor": "gray", "alpha": 1}
-        self.kwargs_histo_two_site = {"site_a" : {"color": "blue", "edgecolor": "gray", "alpha": 0.6},
-                                "site_b" : {"color": "violet", "edgecolor": "gray", "alpha": 0.6},
+        self.kwargs_histo_two_sites = {"site_1" : {"color": "blue", "edgecolor": "gray", "alpha": 0.6},
+                                "site_2" : {"color": "violet", "edgecolor": "gray", "alpha": 0.6},
                                 "cross"  : {"color": "lime", "edgecolor": "gray", "alpha": 0.6}}
 
 #___________________________________________________
@@ -55,7 +55,7 @@ class Plotter:
         ax.set_yscale('log')
 
         # Plot the actual histogram
-        ax.hist(df_data['lengthM'], bins=bins, weights=np.full(len(df_data), 1/nb_normalize), **self.kwargs_histo_one_site)
+        ax.hist(df_data['lengthM'], bins=bins, weights=np.full(len(df_data), 1/nb_normalize), **self.kwargs_histo_two_sites["site_1"])
 
         # Plot the expected histogram for a constant Ne
         calculator = Calculator(self.chr_lgts)
@@ -66,6 +66,50 @@ class Plotter:
             y = bin_width * segment_density_func(x, N)
             ax.plot(x, y, color=c, linestyle='dashed', scaley=False)
             ax.text(x[100], y[100], f"Ne={int(N)}", color='black')
+
+        return fig, ax
+
+    def plot_histo_two_sites(self, df_site1:pd.DataFrame, df_site2:pd.DataFrame, df_cross:pd.DataFrame,
+                            nb_pairs1: int=1, nb_pairs2: int=1, nb_pairs_cross: int=1,
+                            bins=np.arange(0.08, 0.30, 0.005),
+                            Ne:list[int]=[1500, 3000, 5000], delta_t:list[int]=[10, 20, 50],
+                            xlabel:str|None=None, ylabel:str|None=None,
+                            name_site1:str="Site 1", name_site2:str="Site 2"
+        ):
+        """Plot IBD within and between two sites."""
+        fig, ax = plt.subplots()
+
+        # Format the plot
+        if xlabel is None:
+            xlabel = f"IBD segment length (M)"
+        if ylabel is None:
+            ylabel = f"Average nb of IBD segments per pair"
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.set_xlim(bins[0], bins[-1]+(bins[1]-bins[0]))
+        ax.set_yscale('log')
+
+        # Plot the actual histogram
+        ax.hist(df_site1['lengthM'], bins=bins, weights=np.full(len(df_site1), 1/nb_pairs1), **self.kwargs_histo_two_sites["site_1"], label=name_site1)
+        ax.hist(df_site2['lengthM'], bins=bins, weights=np.full(len(df_site2), 1/nb_pairs2), **self.kwargs_histo_two_sites["site_2"], label=name_site2)
+        ax.hist(df_cross['lengthM'], bins=bins, weights=np.full(len(df_cross), 1/nb_pairs_cross), **self.kwargs_histo_two_sites["cross"], label="Between sites")
+
+        calculator = Calculator(self.chr_lgts)
+        x = np.linspace(bins[0], bins[-1], 1000)
+        bin_width = bins[1] - bins[0]
+        bin_mids = (bins[:-1] + bins[1:]) / 2
+        # Plot the expected histogram for a constant Ne
+        for N, c in zip(Ne, self.Ne_colors):
+            y = bin_width * calculator.ibd_density_Ne(x, N)
+            ax.plot(x, y, color=c, linestyle='dashed', scaley=False)
+            ax.text(x[100], y[100], f"Ne={int(N)}", color='black')
+
+        # Plot the expected histogram for different delta t
+        Y = calculator.ibd_decay(delta_t, [1], bins, df_site1['lengthM'], nb_pairs1)  # shape (len(delta_t), 1, len(bins)-1)
+        for i, (dt, c) in enumerate(zip(delta_t, self.delta_t_colors)):
+            ax.plot(bin_mids, Y[i, 0, :], color=c, scaley=False, label=f"delta_t={dt}")
+
+        ax.legend()
 
         return fig, ax
 #___________________________________________________
@@ -206,12 +250,12 @@ class Plotter:
 #___________________________________________________
 # Detail of results for one individual on one chromosome
 #___________________________________________________
-
     def plot_chromosome_detail(self, df_roh:pd.DataFrame|None=None, df_roh_2:pd.DataFrame|None=None, df_het:pd.DataFrame|None=None,
-                                unit:Literal['M', 'BP']='BP',
+                                unit:Literal['M', 'BP']='M',
                                 chrom:int|list|None=None,
                                 max_points:int|None=10000,
-                                window_size:float|None=10000, step_size:float|None=5000,
+                                window_size:float|None=None, step_size:float|None=None,
+                                roh_label:None|str=None, roh_2_label:None|str=None,
                                 figsize:tuple|None=None):
         """Plot the given ROH, along with the heterozygosity. If given two dataframes, plot them side by side for comparison.
         """
@@ -244,7 +288,7 @@ class Plotter:
             print(f"Plotting chromosome {chr}")
             # Plot heterozygosity if provided
             if df_het is not None and len(df_het) > 0:
-                df_het_ch: pd.DataFrame = df_het[df_het['ch']==chr]
+                df_het_ch: pd.DataFrame = df_het[df_het['ch'].astype(str)==str(chr)]
 
                 # Scatter heterozygous SNP
                 if max_points is not None:
@@ -254,41 +298,40 @@ class Plotter:
                 ax.scatter(df_het_ch[f'pos{unit}'], df_het_ch['het'].astype(int), marker=m, **kwargs_het)
 
                 # Add percentage of heterozygous SNPs over a slinding window
-                starts = np.arange(0, df_het_ch[f"pos{unit}"].max()+step_size, step_size)
+                if (window_size is not None) and (window_size is not None):
+                    if df_het_ch[f"pos{unit}"].max()/window_size > 1e6:
+                        raise(ValueError("To small steps for sliding window. Verify that step_side and unit match"))
+                    starts = np.arange(0, df_het_ch[f"pos{unit}"].max()-window_size, step_size)
+                else:
+                    starts = np.linspace(0, 0.99*df_het_ch[f"pos{unit}"].max(),100)
+                    window_size = starts[1] - starts[0]
                 het_percentage = []
                 for start in starts:
                     mask = (df_het_ch[f"pos{unit}"] >= start) & (df_het_ch[f"pos{unit}"] < start+window_size)
                     if mask.sum() > 0:
                         het_percentage.append(df_het_ch.loc[mask, "het"].mean())
                     else:
-                        het_percentage.append(0)
+                        het_percentage.append(np.nan)
                 ax.plot(starts+window_size/2, het_percentage, color='black', linewidth=0.5)
 
             # Plot ROH segments
             if df_roh is not None:
-                df_roh_ch = df_roh[df_roh['ch']==chr]
+                df_roh_ch = df_roh[df_roh['ch'].astype(str)==str(chr)]
                 ax.hlines(xmin=df_roh_ch[f'Start{unit}'], xmax=df_roh_ch[f'End{unit}'],
                           y=[1.2]*len(df_roh_ch.index),**kwargs_roh_1)
             if df_roh_2 is not None:
-                df_roh_2_ch = df_roh_2[df_roh_2['ch']==chr]
+                df_roh_2_ch = df_roh_2[df_roh_2['ch'].astype(str)==str(chr)]
                 ax.hlines(xmin=df_roh_2_ch[f'Start{unit}'], xmax=df_roh_2_ch[f'End{unit}'],
                           y=[1.4]*len(df_roh_2_ch.index),**kwargs_roh_2)
 
-            # Adjust x_axis
-            # if chrom_length is not None:
-            #     if isinstance(chrom_length, list):
-            #         xmax = chrom_length[chr-1]
-            #     else:
-            #         xmax = chrom_length
-            #     ax.set_xlim(0, xmax)
-
-            ax.set_title(f"chromosome {chr}")
+            ### Format ax
+            ax.set_title(f"Chromosome {chr}")
             ax.set_yticks([0, 1])
             ax.tick_params(axis='y', which='minor', left=False, right=False)
 
-        ax.set_xlabel(f"Genetic position ({unit})")
-        ax.set_ylabel("  Heterozygosity", loc='bottom', labelpad=-40)
-        # ax.set_yticks([1.2, 1.4], labels=["post-p. ROH", "raw ROH"], rotation=0, minor=True)
+            ax.set_xlabel(f"Genetic position ({unit})")
+            ax.set_ylabel("Heterozygosity")
+            ax.set_yticks([1.2, 1.4], labels=[roh_label, roh_2_label], rotation=0, minor=True)
 
         return fig, axes
 #___________________________________________________

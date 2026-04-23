@@ -3,6 +3,7 @@ from IBDecay.utils import chromosome_lengthsM_human
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize_scalar, brentq
+import matplotlib.pyplot as plt
 
 from typing import Literal, Tuple
 
@@ -157,31 +158,31 @@ class Calculator:
         return 4 * p_coal * pdf
 
 #### IBD accross generations
-# TODO fix this
-    def ibd_decay(self, t:np.ndarray, admix:np.ndarray, bins:np.ndarray, lengths_0:np.ndarray, nb_pairs_0:float):
-        """"Returns the expected IBD length distribution, after a certain number of generations.
+# TODO: use all segments from lengths_ancestral to compute the expectations, not only those who fall within bins
+    def ibd_decay(self, t:np.ndarray, admix:np.ndarray, bins:np.ndarray, lengths_ancestral:np.ndarray, nb_pairs_ancestral:float):
+        """"Returns the expected nb of IBD in each bin, for a pair of samples separated by `t` generations.
         Args:
-            t: nb of generations between the two populations. Can be a float or an array of float
+            t: nb of generations between the samples. Can be a float or an array of float
             admix: admixture coefficient. Can be a float or an array of float
             bins: bins to discretize the IBD lengths.
-            lengths_0: IBD lengths at time 0.
-            nb_pairs_0: number of pairs at time 0.
+            lengths_ancestral: IBD lengths in the ancestral population.
+            nb_pairs_ancestral: number of pairs in the ancestral population.
         Returns:
-            A 2D array of shape (len(t), len(admix))"""
+            A 3D array of shape (len(t), len(admix), len(bins)-1) with the expected nb of IBD per bin for each combination of t and admix."""
         t = np.asarray(t)
         admix = np.asarray(admix)
 
         # discretization and cumsums approximatimg integrals
         bin_sizes = bins[1:] - bins[:-1]
-        bin_mids = bins[:-1] + bin_sizes / 2
-        x0 = np.histogram(lengths_0, bins=bins, density=False)[0] / nb_pairs_0
+        bin_mids = (bins[:-1] + bins[1:]) / 2
+        x0 = np.histogram(lengths_ancestral, bins=bins, density=False)[0] / nb_pairs_ancestral
         cumsum1 = x0 * bin_sizes
         cumsum1 = np.cumsum(cumsum1[::-1])[::-1]
         cumsum2 = x0 * bin_mids * bin_sizes
         cumsum2 =  np.cumsum(cumsum2[::-1])[::-1]
 
         res = np.exp(-bin_mids * t[:, np.newaxis]) * (x0 + (2*t[:, np.newaxis] - t[:, np.newaxis]**2 * bin_mids)*cumsum1 + t[:, np.newaxis]**2 * cumsum2)
-        res = res * admix[np.newaxis, :, np.newaxis]
+        res = res[:, np.newaxis, :] * admix[np.newaxis, :, np.newaxis]
         return res
 
 class Estimator:
@@ -197,7 +198,7 @@ class Estimator:
             observed_length: array containing the length of the observed IBD/ROH segments.
             data_type: type of data, either 'IBD' or 'ROH'.
             nb_observations: number of observations considered.
-            bin: tuple containing the lower and upper bounds for the length of the IBD/ROH segments.
+            bin: tuple containing the lower and upper bounds for the length of the IBD/ROH segments to use.
         """
         calculator = Calculator(self.chr_lgts)
         if data_type == 'IBD':
@@ -222,7 +223,7 @@ class Estimator:
             observed_length: array containing the length of the observed IBD/ROH segments.
             data_type: type of data, either 'IBD' or 'ROH'.
             nb_observations: number of observations considered.
-            bin: tuple containing the lower and upper bounds for the length of the IBD/ROH segments.
+            bin: tuple containing the lower and upper bounds for the length of the IBD/ROH segments to use.
         Returns:
             The optimal Ne and the 95% confidence interval."""
 
@@ -236,39 +237,42 @@ class Estimator:
 
         return res.x, (ci_lower, ci_upper)
 
-# TODO: adapt this
-class Estimator_IBDecay:
-    def __init__(self, df_0:pd.DataFrame, df_t:pd.DataFrame, nb_pairs_0:float=1, nb_pairs_t:float=1,
-                 bins_size=0.01, x_min=0.04, x_max=0.2, bins=None):
-        """Initializes the estimator.
-        All IBD segments longer than x_min are used to compute the expectations, but only those within [x_min, x_max] are used for the likelihood.
-        """
-        if bins is None:
-            bins = np.arange(x_min, df_0['lengthM'].max()+bins_size, bins_size)
-        if x_max < bins[-1]:
-            x_max_id = np.searchsorted(bins, x_max)
-        else:
-            x_max_id = len(bins)
-        self.id_max = x_max_id
-
-        self.calculator = Calculator_IBD(bins=bins, df_0=df_0, nb_pairs_0=nb_pairs_0)
-        self.xt = np.histogram(df_t['lengthM'], bins=bins, density=False)[0]  # total IBD amount
-        self.nb_pairs_t = nb_pairs_t
-
-    def log_likelihood(self, t_grid, admix_grid):
+    def log_likelihood_IBDecay(self, t:np.ndarray, admix:np.ndarray, bins:np.ndarray,
+                               lengths_ancestral:np.ndarray, nb_pairs_ancestral:float,
+                               lengths_between:np.ndarray, nb_pairs_between:float) -> np.ndarray:
         """Returns the log-likelihood of observing the data at time t since common ancestor.
-        Args:
-            t: time since common ancestor
-            admix: proportion of admixture from a source with no shared ancestry (ie no IBD)"""
-        t_grid = np.asarray(t_grid)
-        admix_grid = np.asarray(admix_grid)
-        expected = self.calculator.ibd_decay_analytics(t_grid)  # expected[time, bin]
-        expected = expected[:, np.newaxis, :] * admix_grid[np.newaxis, :, np.newaxis]  # expected[time, admix, bin]
-        ll = self.xt[np.newaxis, np.newaxis, :] * np.log(expected+1e-30) - self.nb_pairs_t * expected # ll[time, admix, bin]
-        ll = ll[:, :, :self.id_max]
+        Args:            t: time since common ancestor
+            admix: proportion of admixture from a source with no shared ancestry (ie no IBD)
+            bins: bins to discretize the IBD lengths
+            lengths_ancestral: IBD lengths in the ancestral population.
+            nb_pairs_ancestral: number of pairs in the ancestral population.
+            lengths_between: IBD lengths between the two populations.
+            nb_pairs_between: number of pairs between the two populations.
+        Returns:
+            A 2D array of shape (len(t), len(admix)) with the log-likelihood for each combination of t and admix."""
+        calculator = Calculator(self.chr_lgts)
+        expected = calculator.ibd_decay(t, admix, bins, lengths_ancestral, nb_pairs_ancestral)  # expected[time, admix, bin] per pair
+        xt = np.histogram(lengths_between, bins=bins, density=False)[0]  # observed IBD distribution between the two populations
+        ll = xt[np.newaxis, np.newaxis, :] * np.log(expected+1e-30) - nb_pairs_between * expected # ll[time, admix, bin]
         ll = np.sum(ll, axis=2)  # ll[time, admix]
         ll -= np.max(ll)
+        return ll
 
+    def estimate_IBDecay(self, t_grid:np.ndarray, admix_grid:np.ndarray, bins:np.ndarray,
+                         lengths_ancestral:np.ndarray, nb_pairs_ancestral:float,
+                         lengths_between:np.ndarray, nb_pairs_between:float) -> (float, float, np.ndarray):
+        """Returns the optimal t and admix that maximize the log-likelihood of observing the data.
+        Args:
+            t_grid: grid of time since common ancestor to test
+            admix_grid: grid of admixture proportion to test
+            bins: bins to discretize the IBD lengths
+            lengths_ancestral: IBD lengths in the ancestral population.
+            nb_pairs_ancestral: number of pairs in the ancestral time.
+            lengths_between: IBD lengths between the two populations.
+            nb_pairs_between: number of pairs between the two populations.
+        Returns:
+            The optimal t, the optimal admix, and the log-likelihood for each combination of t and admix."""
+        ll = self.log_likelihood_IBDecay(t_grid, admix_grid, bins, lengths_ancestral, nb_pairs_ancestral, lengths_between, nb_pairs_between)
         time_opt, admix_opt = np.unravel_index(np.argmax(ll), ll.shape)
         time_opt = t_grid[time_opt]
         admix_opt = admix_grid[admix_opt]

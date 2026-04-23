@@ -97,7 +97,15 @@ class DataHandler:
 # Summary Stats:
 #___________________________________________________
 def create_stats(df:pd.DataFrame, L=[8,12,16,20], data_type:Literal['IBD', 'ROH']='IBD', save:None|str=None) -> pd.DataFrame:
-    """Compute summary stats for the pandas df_RG"""
+    """Compute summary stats from a dataframe containing IBD or ROH segments. For each individual (ROH) or pair of individuals (IBD), compute the maximum segment length, the number of segments longer than L, and the sum of segment lengths longer than L.
+    Args:
+        df: Dataframe containing the IBD or ROH segments. Must contain columns 'iid1', 'iid2' (for IBD) or 'iid' (for ROH), and 'lengthM'.
+        L: List of length thresholds to compute the stats for.
+        data_type: Type of data, either 'IBD' or 'ROH'. Determines the columns to group by.
+        save: If not None, path to save the resulting dataframe as a csv file.
+    Returns:
+        Dataframe containing the summary stats for each individual (ROH) or pair of individuals (IBD).
+    """
     if data_type == 'IBD':
         id_col = ['iid1', 'iid2']
     elif data_type == 'ROH':
