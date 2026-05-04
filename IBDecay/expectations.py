@@ -3,7 +3,6 @@ from IBDecay.utils import chromosome_lengthsM_human
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize_scalar, brentq
-import matplotlib.pyplot as plt
 
 from typing import Literal, Tuple
 
@@ -158,8 +157,9 @@ class Calculator:
         return 4 * p_coal * pdf
 
 #### IBD accross generations
-# TODO: use all segments from lengths_ancestral to compute the expectations, not only those who fall within bins
-    def ibd_decay(self, t:np.ndarray, admix:np.ndarray, bins:np.ndarray, lengths_ancestral:np.ndarray, nb_pairs_ancestral:float):
+# This version discretises both f_AA (the ancestral IBD distribution) and f_AB (the new IBD distribution), using the same bins.
+# This is problematic as all segments to long to fall in a bin are ignored, even if they contribute to the amount of shorter segments.
+    def ibd_decay_old(self, t:np.ndarray, admix:np.ndarray, bins:np.ndarray, lengths_ancestral:np.ndarray, nb_pairs_ancestral:float):
         """"Returns the expected nb of IBD in each bin, for a pair of samples separated by `t` generations.
         Args:
             t: nb of generations between the samples. Can be a float or an array of float
@@ -171,8 +171,9 @@ class Calculator:
             A 3D array of shape (len(t), len(admix), len(bins)-1) with the expected nb of IBD per bin for each combination of t and admix."""
         t = np.asarray(t)
         admix = np.asarray(admix)
+        lengths_ancestral = np.asarray(lengths_ancestral)
 
-        # discretization and cumsums approximatimg integrals
+        # discretization and cumsums approximatimg integrals from l to inf
         bin_sizes = bins[1:] - bins[:-1]
         bin_mids = (bins[:-1] + bins[1:]) / 2
         x0 = np.histogram(lengths_ancestral, bins=bins, density=False)[0] / nb_pairs_ancestral
@@ -184,6 +185,65 @@ class Calculator:
         res = np.exp(-bin_mids * t[:, np.newaxis]) * (x0 + (2*t[:, np.newaxis] - t[:, np.newaxis]**2 * bin_mids)*cumsum1 + t[:, np.newaxis]**2 * cumsum2)
         res = res[:, np.newaxis, :] * admix[np.newaxis, :, np.newaxis]
         return res
+
+# This version sums over all ancestral segments insted of first grouping them into bins.
+    def ibd_decay_new(
+        self,
+        t: np.ndarray,
+        admix: np.ndarray,
+        bins: np.ndarray,
+        lengths_ancestral: np.ndarray,
+        nb_pairs_ancestral: float,
+    ) -> np.ndarray:
+        """Returns the expected nb of IBD in each bin, for pairs of samples.
+
+        Args:
+            t: nb of generations between samples, shape (T,)
+            admix: admixture coefficients, shape (A,)
+            bins: bin edges, shape (B+1,)
+            lengths_ancestral: IBD lengths in ancestral population, shape (N,)
+            nb_pairs_ancestral: number of pairs in the ancestral population
+
+        Returns:
+            Array of shape (T, A, B) with expected IBD counts per bin.
+        """
+        t = np.asarray(t, dtype=float)           # (T,)
+        admix = np.asarray(admix, dtype=float)   # (A,)
+        lengths_ancestral = np.asarray(lengths_ancestral)
+
+        bin_lo = bins[:-1]   # (B,)
+        bin_hi = bins[1:]    # (B,)
+        bin_mids = (bin_lo + bin_hi) / 2.0       # (B,)
+        bin_sizes = bin_hi - bin_lo              # (B,)
+
+        # Baseline: ancestral IBD density per bin, shape (B,)
+        x0 = np.histogram(lengths_ancestral, bins=bins)[0]
+
+        # Precompute per-(bin, segment) quantities — shape (B, N)
+        overlap = np.clip(lengths_ancestral[np.newaxis, :] - bin_lo[:, np.newaxis],
+                        0.0, bin_sizes[:, np.newaxis])                      # (B, N)
+        slope = lengths_ancestral[np.newaxis, :] - bin_mids[:, np.newaxis]  # (B, N)
+
+        # Precompute per-(t, bin) decay — shape (T, B)
+        decay = np.exp(-np.outer(t, bin_mids))  # (T, B)
+
+        # decompose the integral two parts: one with the constant term (2*t) and one with the linear term (t^2 * slope)
+        A = overlap.sum(axis=1)                        # (B,)  — sum of overlaps
+        C = (slope * overlap).sum(axis=1)              # (B,)  — weighted sum
+        integral = 2 * np.outer(t, A) + np.outer(t**2, C)   # (T, B)
+
+        # Decay factor and combination with baseline
+        decay = np.exp(-bin_mids[np.newaxis, :] * t[:, np.newaxis])  # (T, B)
+        ibd_per_pair = decay * (x0[np.newaxis, :] + integral)        # (T, B)
+
+        # Scale by admixture: output shape (T, A, B)
+        return ibd_per_pair[:, np.newaxis, :] * admix[np.newaxis, :, np.newaxis] / nb_pairs_ancestral
+
+    def ibd_decay(self, t:np.ndarray, admix:np.ndarray, bins:np.ndarray, lengths_ancestral:np.ndarray, nb_pairs_ancestral:float, old_version=False):
+        if old_version:
+            return self.ibd_decay_old(t, admix, bins, lengths_ancestral, nb_pairs_ancestral)
+        else:
+            return self.ibd_decay_new(t, admix, bins, lengths_ancestral, nb_pairs_ancestral)
 
 class Estimator:
     """Class implementing the most likelihood estimation."""
@@ -239,7 +299,7 @@ class Estimator:
 
     def log_likelihood_IBDecay(self, t:np.ndarray, admix:np.ndarray, bins:np.ndarray,
                                lengths_ancestral:np.ndarray, nb_pairs_ancestral:float,
-                               lengths_between:np.ndarray, nb_pairs_between:float) -> np.ndarray:
+                               lengths_between:np.ndarray, nb_pairs_between:float, old_version: bool=False) -> np.ndarray:
         """Returns the log-likelihood of observing the data at time t since common ancestor.
         Args:            t: time since common ancestor
             admix: proportion of admixture from a source with no shared ancestry (ie no IBD)
@@ -251,7 +311,7 @@ class Estimator:
         Returns:
             A 2D array of shape (len(t), len(admix)) with the log-likelihood for each combination of t and admix."""
         calculator = Calculator(self.chr_lgts)
-        expected = calculator.ibd_decay(t, admix, bins, lengths_ancestral, nb_pairs_ancestral)  # expected[time, admix, bin] per pair
+        expected = calculator.ibd_decay(t, admix, bins, lengths_ancestral, nb_pairs_ancestral, old_version=old_version)  # expected[time, admix, bin] per pair
         xt = np.histogram(lengths_between, bins=bins, density=False)[0]  # observed IBD distribution between the two populations
         ll = xt[np.newaxis, np.newaxis, :] * np.log(expected+1e-30) - nb_pairs_between * expected # ll[time, admix, bin]
         ll = np.sum(ll, axis=2)  # ll[time, admix]
@@ -260,7 +320,7 @@ class Estimator:
 
     def estimate_IBDecay(self, t_grid:np.ndarray, admix_grid:np.ndarray, bins:np.ndarray,
                          lengths_ancestral:np.ndarray, nb_pairs_ancestral:float,
-                         lengths_between:np.ndarray, nb_pairs_between:float) -> (float, float, np.ndarray):
+                         lengths_between:np.ndarray, nb_pairs_between:float, old_version: bool=False) -> (float, float, np.ndarray):
         """Returns the optimal t and admix that maximize the log-likelihood of observing the data.
         Args:
             t_grid: grid of time since common ancestor to test
@@ -272,7 +332,7 @@ class Estimator:
             nb_pairs_between: number of pairs between the two populations.
         Returns:
             The optimal t, the optimal admix, and the log-likelihood for each combination of t and admix."""
-        ll = self.log_likelihood_IBDecay(t_grid, admix_grid, bins, lengths_ancestral, nb_pairs_ancestral, lengths_between, nb_pairs_between)
+        ll = self.log_likelihood_IBDecay(t_grid, admix_grid, bins, lengths_ancestral, nb_pairs_ancestral, lengths_between, nb_pairs_between, old_version=old_version)
         time_opt, admix_opt = np.unravel_index(np.argmax(ll), ll.shape)
         time_opt = t_grid[time_opt]
         admix_opt = admix_grid[admix_opt]

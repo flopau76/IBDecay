@@ -1,3 +1,5 @@
+from matplotlib.ticker import FixedLocator, FuncFormatter
+
 from IBDecay.expectations import Calculator
 from IBDecay.utils import chromosome_lengthsM_human
 
@@ -24,16 +26,26 @@ class Plotter:
 
         # histogramm colors
         self.kwargs_histo_one_site = {"color": "sandybrown", "edgecolor": "gray", "alpha": 1}
-        self.kwargs_histo_two_sites = {"site_1" : {"color": "blue", "edgecolor": "gray", "alpha": 0.6},
-                                "site_2" : {"color": "violet", "edgecolor": "gray", "alpha": 0.6},
-                                "cross"  : {"color": "lime", "edgecolor": "gray", "alpha": 0.6}}
-
+        self.kwargs_histo_two_sites = {"site_1" : {"fill": False, "color": "blue", "edgecolor": "gray", "alpha": 1},
+                                "site_2" : {"fill": False, "color": "violet", "edgecolor": "gray", "alpha": 1},
+                                "cross"  : {"fill": False, "hatch": "/", "edgecolor": "gray"},
+                                "both"   : {"color": ["#FFE5C9", "#C8F2FF"], "edgecolor": None},
+                                }
 #___________________________________________________
 # Histograms at population levels
 #___________________________________________________
+    def _plot_histo_format(self, ax:Axes, bins:np.ndarray):
+        """Format the histogram plot."""
+        ax.set_xlim(bins[0], bins[-1]+(bins[1]-bins[0]))
+        ax.set_yscale('log')
+        n_major = 6
+        step = max(1, len(bins) // n_major)
+        ax.xaxis.set_major_locator(FixedLocator(bins[::step]))
+        ax.xaxis.set_minor_locator(FixedLocator(bins))
+        ax.xaxis.set_major_formatter(FuncFormatter(lambda x, _: f'{x * 100:.4g}'))
+
     def plot_histo(self, df_data:pd.DataFrame, nb_normalize: int=1, bins=np.arange(0.08, 0.30, 0.005),
-            data_type:Literal['IBD', 'ROH']='IBD', Ne:list[int]=[1500, 3000, 5000],
-            xlabel:str|None=None, ylabel:str|None=None
+            data_type:Literal['IBD', 'ROH']='IBD', Ne:list[int]=[1500, 3000, 5000]
         ):
         """Plot data histogram.
         Args:
@@ -42,20 +54,15 @@ class Plotter:
             bins: Bins to use for the histogram.
             data_type: 'IBD' or 'ROH'.
             Ne: List of effective population sizes to plot the expected lines for."""
-        fig, ax = plt.subplots()
-
+        
         # Format the plot
-        if xlabel is None:
-            xlabel = f"{data_type} segment length (M)"
-        if ylabel is None:
-            ylabel = f"Average nb of {data_type} segments per {'pair' if data_type=='IBD' else 'individual'}"
-        ax.set_xlabel(xlabel)
-        ax.set_ylabel(ylabel)
-        ax.set_xlim(bins[0], bins[-1]+(bins[1]-bins[0]))
-        ax.set_yscale('log')
+        fig, ax = plt.subplots()
+        ax.set_xlabel(f"Binned {data_type} length (cM)")
+        ax.set_ylabel(f"Average {data_type} per {'pair' if data_type=='IBD' else 'individual'} and bin")
+        self._plot_histo_format(ax, bins)
 
         # Plot the actual histogram
-        ax.hist(df_data['lengthM'], bins=bins, weights=np.full(len(df_data), 1/nb_normalize), **self.kwargs_histo_two_sites["site_1"])
+        ax.hist(df_data['lengthM'], bins=bins, weights=np.full(len(df_data), 1/nb_normalize), **self.kwargs_histo_one_site)
 
         # Plot the expected histogram for a constant Ne
         calculator = Calculator(self.chr_lgts)
@@ -77,21 +84,17 @@ class Plotter:
                             name_site1:str="Site 1", name_site2:str="Site 2"
         ):
         """Plot IBD within and between two sites."""
-        fig, ax = plt.subplots()
 
-        # Format the plot
-        if xlabel is None:
-            xlabel = f"IBD segment length (M)"
-        if ylabel is None:
-            ylabel = f"Average nb of IBD segments per pair"
-        ax.set_xlabel(xlabel)
-        ax.set_ylabel(ylabel)
-        ax.set_xlim(bins[0], bins[-1]+(bins[1]-bins[0]))
-        ax.set_yscale('log')
+        ### Format the plot
+        fig, ax = plt.subplots()
+        ax.set_xlabel(f"Binned IBD length (cM)")
+        ax.set_ylabel(f"Average IBD per pair and bin")
+        self._plot_histo_format(ax, bins)
 
         # Plot the actual histogram
-        ax.hist(df_site1['lengthM'], bins=bins, weights=np.full(len(df_site1), 1/nb_pairs1), **self.kwargs_histo_two_sites["site_1"], label=name_site1)
-        ax.hist(df_site2['lengthM'], bins=bins, weights=np.full(len(df_site2), 1/nb_pairs2), **self.kwargs_histo_two_sites["site_2"], label=name_site2)
+        ax.hist([df_site1['lengthM'], df_site2['lengthM']], bins=bins, weights=[np.full(len(df_site1), 1/nb_pairs1), np.full(len(df_site2), 1/nb_pairs2)], **self.kwargs_histo_two_sites["both"], label=[name_site1, name_site2])
+        # ax.hist(df_site1['lengthM'], bins=bins, weights=np.full(len(df_site1), 1/nb_pairs1), **self.kwargs_histo_two_sites["site_1"], label=name_site1)
+        # ax.hist(df_site2['lengthM'], bins=bins, weights=np.full(len(df_site2), 1/nb_pairs2), **self.kwargs_histo_two_sites["site_2"], label=name_site2)
         ax.hist(df_cross['lengthM'], bins=bins, weights=np.full(len(df_cross), 1/nb_pairs_cross), **self.kwargs_histo_two_sites["cross"], label="Between sites")
 
         calculator = Calculator(self.chr_lgts)
@@ -107,7 +110,8 @@ class Plotter:
         # Plot the expected histogram for different delta t
         Y = calculator.ibd_decay(delta_t, [1], bins, df_site1['lengthM'], nb_pairs1)  # shape (len(delta_t), 1, len(bins)-1)
         for i, (dt, c) in enumerate(zip(delta_t, self.delta_t_colors)):
-            ax.plot(bin_mids, Y[i, 0, :], color=c, scaley=False, label=f"delta_t={dt}")
+            ax.plot(bin_mids, Y[i, 0, :], color=c, scaley=False)    # , label=f"Δt={dt}"
+            ax.text(bin_mids[-2], Y[i, 0, -2], f"Δt={dt}", color='black')
 
         ax.legend()
 
@@ -365,10 +369,15 @@ class Plotter:
 
         # Confidence interval contour
         threshold_2d = np.max(ll) - 5.991/2     # # chi^2(2, 0.95)/2
-        ax.contour(admix_grid, t_grid, ll, levels=[threshold_2d], colors='red', linewidths=2)
+        cs = ax.contour(admix_grid, t_grid, ll, levels=[threshold_2d], colors='red', linewidths=2)
+
+        # Build legend with existing handles + contour
+        handles, labels = ax.get_legend_handles_labels()
+        contour_handle, _ = cs.legend_elements()  # unpacks the list of one handle
+        contour_handle[0].set_label('95% CI')
+        ax.legend(handles=handles + contour_handle, labels=labels + ['95% CI'])
 
         ax.set_xlabel('Admixture Proportion')
         ax.set_ylabel('Time passed (generations)')
         ax.set_title('Log-likelihood colormap')
-        ax.legend()
         return fig, ax
