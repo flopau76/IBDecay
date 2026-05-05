@@ -76,11 +76,14 @@ class Simulator:
         else:
             return None
 
-    def simulate_ibd_decay(self, t1:float=0, t2:float=0, n_sim:int=10, ploidy:int=2, samples=None, save_path=None) -> pd.DataFrame|None:
+    def simulate_ibd_decay(self, t1:float=0, t2:float=0, n_sim:int=10, ploidy:int=2, samples:msprime.SampleSet|None=None, save_path=None) -> pd.DataFrame|None:
         """Run n_sim simulations of IBD between two individuals from different time points t1 and t2 (generations ago).
         In total: n_sim * ploidy^2 pairs are compared"""
 
         if save_path is not None:
+            if os.path.exists(save_path):
+                warnings.warn(f"Output file already exists: {save_path}. Remove or rename it.")
+                return None
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
         if samples is None:
@@ -104,8 +107,8 @@ class Simulator:
                         tree_seq = sim.simplify(samples=(chrom_1, ploidy + chrom_2))
                         df = self._get_roh_from_tree_seq(tree_seq)
                         df["sim"] = sim_id
-                        df["iid1"] = f"{sim_id}_1"
-                        df["iid2"] = f"{sim_id}_2"
+                        df["iid1"] = "1"
+                        df["iid2"] = "2"
                         df["chr"] = chr_id
                         df["chrom_1"] = chrom_1
                         df["chrom_2"] = chrom_2
