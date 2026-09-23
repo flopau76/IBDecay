@@ -5,11 +5,11 @@
 import pandas as pd
 import numpy as np
 
-from typing import TypedDict, Literal
+from typing import Literal
 
-chromosome_lengthsM_human = [2.8426, 2.688187, 2.232549, 2.14201, 2.040477, 1.917145, 1.871491, 1.680018, 
+chromosome_lengthsM_human = (2.8426, 2.688187, 2.232549, 2.14201, 2.040477, 1.917145, 1.871491, 1.680018, 
             1.661367, 1.8090949, 1.5821669, 1.745901, 1.2551429, 1.1859521, 1.413411, 
-            1.340264, 1.2849959, 1.175495, 1.0772971, 1.082123, 0.636394, 0.724438]
+            1.340264, 1.2849959, 1.175495, 1.0772971, 1.082123, 0.636394, 0.724438)
 
 # inbreeding defined by (nb of meiosis, nb of common ancestors)
 pedigree_dict = {
@@ -60,29 +60,34 @@ class DataHandler:
 
     def get_ibd_iids(self, iids1, iids2=None, filter_rel=("sum_IBD>12", 0, 100)) -> tuple[int, pd.DataFrame]:
         """Returns the IBD segments between two sets of iids, and the number of individual pairs concerned."""
-        if iids2 is None:
-            iids2 = iids1
         iids1 = self.filter_iids_meta(iids1)
-        iids2 = self.filter_iids_meta(iids2)
+        iids2 = iids1 if iids2 is None else self.filter_iids_meta(iids2)
 
+        # compute nb of pairs
+        size_intersec = len(iids1 & iids2)
+        nb_pairs = size_intersec*(size_intersec-1)//2
+        nb_pairs += len(iids1-iids2) * len(iids2-iids1)
+
+        # subset on pairs of concerned individuals
         subset = self.df_ibd_ind[
                 (self.df_ibd_ind['iid1'].isin(iids1) & self.df_ibd_ind['iid2'].isin(iids2)) |
                 (self.df_ibd_ind['iid1'].isin(iids2) & self.df_ibd_ind['iid2'].isin(iids1))
             ]
 
+        # filter out close relatives
+        subset_filtered = subset[['iid1', 'iid2']]
         if filter_rel is not None:
-            col, min, max = filter_rel
-            pairs = subset[['iid1', 'iid2']][(subset[col].between(min, max))]
-        else:
-            pairs = subset[['iid1', 'iid2']]
+            col, _min, _max = filter_rel
+            subset_filtered = subset[['iid1', 'iid2']][(subset[col].between(_min, _max))]
+        nb_removed = len(subset) - len(subset_filtered)
 
-        nb_removed = len(subset) - len(pairs)
-        df_ibd_filtered = self.df_ibd.merge(pairs, on=['iid1', 'iid2'], how='inner')
+        if nb_removed > 0 :
+            print(f"Removed {nb_removed}/{len(subset)} close pairs based on criterium filter_rel={filter_rel}")
+        nb_pairs -= nb_removed
 
-        if iids1 == iids2:
-            return len(iids1)*(len(iids1)-1)//2 - nb_removed, df_ibd_filtered
-        else:
-            return len(iids1)*len(iids2) - nb_removed, df_ibd_filtered
+        df_ibd_filtered = self.df_ibd.merge(subset_filtered, on=['iid1', 'iid2'], how='inner')
+
+        return nb_pairs, df_ibd_filtered
 
     def get_ibd_sites(self, site1: str, site2: str|None=None, filter_rel=("sum_IBD>12", 0, 100)) -> tuple[int, pd.DataFrame]:
         """Returns the IBD segments between two sites, and the number of individual pairs concerned."""
@@ -125,3 +130,40 @@ def create_stats(df:pd.DataFrame, L=[8,12,16,20], data_type:Literal['IBD', 'ROH'
     if save is not None:
         df_stats.to_csv(save, index=False)
     return df_stats
+
+#___________________________________________________
+# Post-proessing:
+#___________________________________________________
+
+def merge_roh(df_roh: pd.DataFrame, min_l1: float, min_l2: float, max_gap: float) -> pd.DataFrame:
+    """Merge ROH segments that are separated by a gap smaller than max_gap (in cM),
+    only if the shorter segment >= min_l1 and the longer segment >= min_l2."""
+
+    if min_l2 < min_l1:
+        min_l1, min_l2 = min_l2, min_l1
+
+    df_roh = df_roh.sort_values(by=["iid", "ch", "StartM"])
+    gap = df_roh["StartM"] - df_roh["EndM"].shift(1)
+    l_prev = df_roh["lengthM"].shift(1)
+    l_curr = df_roh["lengthM"]
+    l_short = np.minimum(l_prev, l_curr)
+    l_long  = np.maximum(l_prev, l_curr)
+
+    merge = (gap <= max_gap) & (l_short >= min_l1) & (l_long >= min_l2) & (df_roh["ch"] == df_roh["ch"].shift(1)) & (df_roh["iid"] == df_roh["iid"].shift(1))
+
+    df_roh["segment_id"] = (~merge).cumsum()
+
+    merged = df_roh.groupby(["segment_id"], observed=False).agg(
+        iid=("iid", "first"),
+        ch=("ch", "first"),
+        StartM=("StartM", "first"),
+        EndM=("EndM", "last"),
+        StartBP=("StartBP", "first"),
+        EndBP=("EndBP", "last")
+    ).reset_index()
+
+    merged["lengthM"] = merged["EndM"] - merged["StartM"]
+    merged["lengthBP"] = merged["EndBP"] - merged["StartBP"]
+    merged = merged.drop(columns="segment_id")
+
+    return merged

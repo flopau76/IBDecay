@@ -1,339 +1,212 @@
-from IBDecay.utils import chromosome_lengthsM_human
+"""Functions to compute expected ROH/IBD distributions, counts, and sums."""
 
 import numpy as np
-import pandas as pd
-from scipy.optimize import minimize_scalar, brentq
 
-from typing import Literal, Tuple
+from IBDecay.utils import chromosome_lengthsM_human
 
-class Calculator:
-    """Class that calculates expected ROH/IBD"""
-
-    def __init__(self, chr_lgts=chromosome_lengthsM_human):
-        self.chr_lgts = chr_lgts
 
 #### ROH based on Ne
-    def roh_density_Ne(self, x, Ne:float):
-        """"Returns the expected ROH distribution, given an effective population size Ne.
-        Args:
-            x: length [in Morgan] where to evaluate the density. Can be a float or an array of float
-            Ne: effective population size"""
-        
-        def roh_density_Ne_chr(x, Ne: float, chr_l:float):
-            return 8 * Ne * (1+4*chr_l*Ne) / (1+4*x*Ne)**3  * (0<x) * (x<chr_l)
 
-        pdfs = [roh_density_Ne_chr(x, Ne, chr_l) for chr_l in self.chr_lgts]
-        pdf_total = np.sum(pdfs, axis=0)
-        return pdf_total
+def _roh_density_Ne_chr(x, Ne: float, chr_l: float):
+    """helper function: roh density for a single chromosome"""
+    return 8 * Ne * (1 + 4 * chr_l * Ne) / (1 + 4 * x * Ne) ** 3 * (0 <= x) * (x <= chr_l)
 
-    def roh_count_Ne(self, bins=(0, np.inf), Ne:float=100):
-        """"Returns the expected number of ROH blocks in a given interval, given an effective population size.
-        Args:
-            bins: tuple or array size (2,n) with bin edges [in Morgan]
-            Ne: effective population size"""
-        
-        def roh_count_Ne_chr(x, Ne:float, chr_l:float):
-            if x <= 0 or x >= chr_l:    # necessary to avoid numerical issues when x is very small or very large (otherwise we get a 0/0 form)
-                return 0
-            return 8 * Ne * (chr_l-x) * (1+2*Ne*(chr_l+x)) / ((1+4*chr_l*Ne) * (1+4*x*Ne)**2)  * (0<x) * (x<chr_l)
 
-        counts = [roh_count_Ne_chr(bins[0], Ne, chr_l)-roh_count_Ne_chr(bins[1], Ne, chr_l) for chr_l in self.chr_lgts]
-        counts_total = np.sum(counts, axis=0)
-        return counts_total
+def roh_density_Ne(x, Ne: float, chr_lgts=chromosome_lengthsM_human):
+    """Returns the expected ROH distribution, given an effective population size Ne.
+    Args:
+        x: length [in Morgan] where to evaluate the density. Can be a float or an array of float
+        Ne: effective population size
+        chr_lgts: chromosome lengths [in Morgan]"""
+    pdfs = [_roh_density_Ne_chr(x, Ne, chr_l) for chr_l in chr_lgts]
+    pdf_total = np.sum(pdfs, axis=0)
+    return pdf_total
 
-    def roh_sum_Ne(self, bins=(0, np.inf), Ne:float=100):
-        """"Returns the expected summed length [in Morgan] of ROH blocks in a given interval, given an effective population size.
-        Args:
-            bins: tuple or array size (2,n) with bin edges [in Morgan]
-            Ne: effective population size"""
-        
-        def roh_sum_Ne_chr(x, Ne:float, chr_l:float):
-            return 8 * Ne * (chr_l-x) * (1+2*Ne*(chr_l+x)) / ((1+4*chr_l*Ne) * (1+4*x*Ne)**2)  * (0<x) * (x<chr_l)
 
-        sums = [roh_sum_Ne_chr(bins[0], Ne, chr_l)-roh_sum_Ne_chr(bins[1], Ne, chr_l) for chr_l in self.chr_lgts]
-        sums_total = np.sum(sums, axis=0)
-        return sums_total
+def _roh_count_Ne_chr(x, Ne: float, chr_l: float):
+    """helper function: integrand of roh_density(x)"""
+    x = np.clip(x, 0, chr_l)
+    return 8 * Ne * (chr_l - x) * (1 + 2 * Ne * (chr_l + x)) / ((1 + 4 * chr_l * Ne) * (1 + 4 * x * Ne) ** 2)
+
+
+def roh_count_Ne(bins=(0, np.inf), Ne: float = 100, chr_lgts=chromosome_lengthsM_human):
+    """Returns the expected number of ROH blocks in a given interval, given an effective population size.
+    Args:
+        bins: tuple or array size (2,n) with bin edges [in Morgan]
+        Ne: effective population size
+        chr_lgts: chromosome lengths [in Morgan]"""
+    counts = [_roh_count_Ne_chr(bins[0], Ne, chr_l) - _roh_count_Ne_chr(bins[1], Ne, chr_l) for chr_l in chr_lgts]
+    counts_total = np.sum(counts, axis=0)
+    return counts_total
+
+
+def _roh_sum_Ne_chr(x, Ne: float, chr_l: float):
+    """helper function: integrand of x * roh_density(x)"""
+    x = np.clip(x, 0, chr_l)
+    return 8 * Ne * (chr_l - x) * (1 + 2 * Ne * (chr_l + x)) / ((1 + 4 * chr_l * Ne) * (1 + 4 * x * Ne) ** 2)
+
+
+def roh_sum_Ne(bins=(0, np.inf), Ne: float = 100, chr_lgts=chromosome_lengthsM_human):
+    """Returns the expected summed length [in Morgan] of ROH blocks in a given interval, given an effective population size.
+    Args:
+        bins: tuple or array size (2,n) with bin edges [in Morgan]
+        Ne: effective population size
+        chr_lgts: chromosome lengths [in Morgan]"""
+    sums = [_roh_sum_Ne_chr(bins[0], Ne, chr_l) - _roh_sum_Ne_chr(bins[1], Ne, chr_l) for chr_l in chr_lgts]
+    sums_total = np.sum(sums, axis=0)
+    return sums_total
+
 
 #### IBD based on Ne
-    def ibd_density_Ne(self, x, Ne:float):
-        """"Returns the expected IBD length distribution, given an effective population size.
-        Args:
-            x: length [in Morgan] where to evaluate the density. Can be a float or an array of float.
-            Ne: effective population size."""
-        return 4 * self.roh_density_Ne(x, Ne)
 
-    def ibd_count_Ne(self, bins=(0, np.inf), Ne:float=100):
-        """"Returns the expected number of IBD blocks in a given interval, given an effective population size.
-        Args:
-            bins: tuple or array size (2,n) with bin edges [in Morgan]
-            Ne: effective population size"""
-        return 4 * self.roh_count_Ne(bins, Ne)
+def ibd_density_Ne(x, Ne: float, chr_lgts=chromosome_lengthsM_human):
+    """Returns the expected IBD length distribution, given an effective population size.
+    Args:
+        x: length [in Morgan] where to evaluate the density. Can be a float or an array of float.
+        Ne: effective population size.
+        chr_lgts: chromosome lengths [in Morgan]"""
+    return 4 * roh_density_Ne(x, Ne, chr_lgts)
 
-    def ibd_sum_Ne(self, bins=(0, np.inf), Ne:float=100):
-        """"Returns the expected summed length [in Morgan] of IBD blocks in a given interval, given an effective population size.
-        Args:
-            bins: tuple or array size (2,n) with bin edges [in Morgan]
-            Ne: effective population size"""
-        return 4 * self.roh_sum_Ne(bins, Ne)
+
+def ibd_count_Ne(bins=(0, np.inf), Ne: float = 100, chr_lgts=chromosome_lengthsM_human):
+    """Returns the expected number of IBD blocks in a given interval, given an effective population size.
+    Args:
+        bins: tuple or array size (2,n) with bin edges [in Morgan]
+        Ne: effective population size
+        chr_lgts: chromosome lengths [in Morgan]"""
+    return 4 * roh_count_Ne(bins, Ne, chr_lgts)
+
+
+def ibd_sum_Ne(bins=(0, np.inf), Ne: float = 100, chr_lgts=chromosome_lengthsM_human):
+    """Returns the expected summed length [in Morgan] of IBD blocks in a given interval, given an effective population size.
+    Args:
+        bins: tuple or array size (2,n) with bin edges [in Morgan]
+        Ne: effective population size
+        chr_lgts: chromosome lengths [in Morgan]"""
+    return 4 * roh_sum_Ne(bins, Ne, chr_lgts)
+
 
 #### HBD based on a pedigree
-    def coalescence_prob_pedigree(self, nb_meiosis:int, comm_anc:int=1) -> float:
-        """Returns the coalescence probability of two alleles, given a pedigree.
-        Args:
-            nb_meiosis: length of the genealogic path between the two alleles
-            comm_anc: nb of such paths"""
-        return comm_anc * 2 * (1 / 2) ** nb_meiosis # factor two because two potential ancestral alleles (diploid)
 
-    def block_density(self, x, nb_meiosis:float):
-        """Returns the expected DNA length distribution, given a number of meiosis.
-        Args:
-            x: length [in Morgan] where to evaluate the density. Can be a float or an array of float
-            nb_meiosis: nb of meiosis -> average nb of recombination per Morgan"""
+def coalescence_prob_pedigree(nb_meiosis: int, comm_anc: int = 1) -> float:
+    """Returns the coalescence probability of two alleles, given a pedigree.
+    Args:
+        nb_meiosis: length of the genealogic path between the two alleles
+        comm_anc: nb of such paths"""
+    return comm_anc * 2 * (1 / 2) ** nb_meiosis  # factor two because two potential ancestral alleles (diploid)
 
-        def block_density_chr(x, nb_meiosis:float, chr_l:float):
-            pdf = ((chr_l-x) * nb_meiosis**2 + nb_meiosis ) * np.exp(-nb_meiosis*x)
-            return pdf * (0<x) * (x<chr_l)
 
-        pdfs = [block_density_chr(x, nb_meiosis, chr_l) for chr_l in self.chr_lgts]
-        pdf_total = np.sum(pdfs, axis=0)
-        return pdf_total
+def _block_density_chr(x, nb_meiosis: float, chr_l: float):
+    pdf = ((chr_l - x) * nb_meiosis ** 2 + nb_meiosis) * np.exp(-nb_meiosis * x)
+    return pdf * (0 < x) * (x < chr_l)
 
-    def block_count(self, bins, nb_meiosis:float):
-        """Returns the expected nb of DNA segments in a given interval, given a number of meiosis.
-        Args:
-            bins: tuple or array size (2,n) with bin edges [in Morgan]
-            nb_meiosis: nb of meiosis -> average nb of recombination per Morgan"""
 
-        def block_count_chr(x, nb_meiosis:float, chr_l:float):
-            count = (chr_l-x) * nb_meiosis * np.exp(-nb_meiosis*x)
-            return count * (0<x) * (x<chr_l)
+def block_density(x, nb_meiosis: float, chr_lgts=chromosome_lengthsM_human):
+    """Returns the expected DNA length distribution, given a number of meiosis.
+    Args:
+        x: length [in Morgan] where to evaluate the density. Can be a float or an array of float
+        nb_meiosis: nb of meiosis -> average nb of recombination per Morgan
+        chr_lgts: chromosome lengths [in Morgan]"""
+    pdfs = [_block_density_chr(x, nb_meiosis, chr_l) for chr_l in chr_lgts]
+    pdf_total = np.sum(pdfs, axis=0)
+    return pdf_total
 
-        counts = [block_count_chr(bins[0], nb_meiosis, chr_l)-block_count_chr(bins[1], nb_meiosis, chr_l) for chr_l in self.chr_lgts]
-        counts_total = np.sum(counts, axis=0)
-        return counts_total
 
-# TODO: check the factors (nb of meiosis between the parents/ between the two alleles of the individual...)
-    def roh_density_pedigree(self, x, nb_meiosis:int, comm_anc:int=1):
-        """Returns the expected ROH distribution within an individual, given the relatedness of its parents.
-        Args:
-            x: length [in Morgan] where to evaluate the density. Can be a float or an array of float
-            nb_meiosis: length of the loop in the genealogy (ex: 4 for the offsping of siblings)
-            comm_an: nb of such paths (ex: 1 for half-siblings, 2 for full-siblings )"""
-        p_coal = self.coalescence_prob_pedigree(nb_meiosis, comm_anc)
-        pdf = self.block_density(x, nb_meiosis)
-        return p_coal * pdf
+def _block_count_chr(x, nb_meiosis: float, chr_l: float):
+    count = (chr_l - x) * nb_meiosis * np.exp(-nb_meiosis * x)
+    return count * (0 < x) * (x < chr_l)
+
+
+def block_count(bins, nb_meiosis: float, chr_lgts=chromosome_lengthsM_human):
+    """Returns the expected nb of DNA segments in a given interval, given a number of meiosis.
+    Args:
+        bins: tuple or array size (2,n) with bin edges [in Morgan]
+        nb_meiosis: nb of meiosis -> average nb of recombination per Morgan
+        chr_lgts: chromosome lengths [in Morgan]"""
+    counts = [_block_count_chr(bins[0], nb_meiosis, chr_l) - _block_count_chr(bins[1], nb_meiosis, chr_l) for chr_l in chr_lgts]
+    counts_total = np.sum(counts, axis=0)
+    return counts_total
+
 
 # TODO: check the factors (nb of meiosis between the parents/ between the two alleles of the individual...)
-    def ibd_density_pedigree(self, x, nb_meiosis:int, comm_anc:int=1):
-        """Returns the expected IBD distribution between two individuals, given their pedigrees.
-        Args:
-            x: length [in Morgan] where to evaluate the density. Can be a float or an array of float
-            nb_meiosis: length of the genealogic path between the two individuals
-            comm_an: nb of such paths"""
-        p_coal = self.coalescence_prob_pedigree(nb_meiosis, comm_anc)
-        pdf = self.block_density(x, nb_meiosis)
-        return 4 * p_coal * pdf
+def roh_density_pedigree(x, nb_meiosis: int, comm_anc: int = 1, chr_lgts=chromosome_lengthsM_human):
+    """Returns the expected ROH distribution within an individual, given the relatedness of its parents.
+    Args:
+        x: length [in Morgan] where to evaluate the density. Can be a float or an array of float
+        nb_meiosis: length of the loop in the genealogy (ex: 4 for the offsping of siblings)
+        comm_anc: nb of such paths (ex: 1 for half-siblings, 2 for full-siblings)
+        chr_lgts: chromosome lengths [in Morgan]"""
+    p_coal = coalescence_prob_pedigree(nb_meiosis, comm_anc)
+    pdf = block_density(x, nb_meiosis, chr_lgts)
+    return p_coal * pdf
+
 
 # TODO: check the factors (nb of meiosis between the parents/ between the two alleles of the individual...)
-    def roh_count_pedigree(self, bins, nb_meiosis:int, comm_anc:int=1):
-        """Returns the expected number of ROH in a given interval, given the relatedness of its parents.
-        Args:
-            bins: tuple or array size (2,n) with bin edges [in Morgan]
-            nb_meiosis: length of the genealogic path between its parents
-            comm_an: nb of such paths"""
-        p_coal = 2 * self.coalescence_prob_pedigree(nb_meiosis+2, comm_anc)
-        pdf = self.block_count(bins, nb_meiosis+2)
-        return p_coal * pdf
+def ibd_density_pedigree(x, nb_meiosis: int, comm_anc: int = 1, chr_lgts=chromosome_lengthsM_human):
+    """Returns the expected IBD distribution between two individuals, given their pedigrees.
+    Args:
+        x: length [in Morgan] where to evaluate the density. Can be a float or an array of float
+        nb_meiosis: length of the genealogic path between the two individuals
+        comm_anc: nb of such paths
+        chr_lgts: chromosome lengths [in Morgan]"""
+    p_coal = coalescence_prob_pedigree(nb_meiosis, comm_anc)
+    pdf = block_density(x, nb_meiosis, chr_lgts)
+    return 4 * p_coal * pdf
+
 
 # TODO: check the factors (nb of meiosis between the parents/ between the two alleles of the individual...)
-    def ibd_count_pedigree(self, bins, nb_meiosis:int, comm_anc:int=1):
-        """Returns the expected number of IBD in a given interval, given their relatedness.
-        Args:
-            bins: tuple or array size (2,n) with bin edges [in Morgan]
-            nb_meiosis: length of the genealogic path between the two individuals
-            comm_an: nb of such paths"""
-        p_coal = self.coalescence_prob_pedigree(nb_meiosis, comm_anc)
-        pdf = self.block_count(bins, nb_meiosis)
-        return 4 * p_coal * pdf
+def roh_count_pedigree(bins, nb_meiosis: int, comm_anc: int = 1, chr_lgts=chromosome_lengthsM_human):
+    """Returns the expected number of ROH in a given interval, given the relatedness of its parents.
+    Args:
+        bins: tuple or array size (2,n) with bin edges [in Morgan]
+        nb_meiosis: length of the genealogic path between its parents
+        comm_anc: nb of such paths
+        chr_lgts: chromosome lengths [in Morgan]"""
+    p_coal = 2 * coalescence_prob_pedigree(nb_meiosis + 2, comm_anc)
+    pdf = block_count(bins, nb_meiosis + 2, chr_lgts)
+    return p_coal * pdf
 
-#### IBD accross generations
-# This version discretises both f_AA (the ancestral IBD distribution) and f_AB (the new IBD distribution), using the same bins.
-# This is problematic as all segments to long to fall in a bin are ignored, even if they contribute to the amount of shorter segments.
-    def ibd_decay_old(self, t:np.ndarray, admix:np.ndarray, bins:np.ndarray, lengths_ancestral:np.ndarray, nb_pairs_ancestral:float):
-        """"Returns the expected nb of IBD in each bin, for a pair of samples separated by `t` generations.
-        Args:
-            t: nb of generations between the samples. Can be a float or an array of float
-            admix: admixture coefficient. Can be a float or an array of float
-            bins: bins to discretize the IBD lengths.
-            lengths_ancestral: IBD lengths in the ancestral population.
-            nb_pairs_ancestral: number of pairs in the ancestral population.
-        Returns:
-            A 3D array of shape (len(t), len(admix), len(bins)-1) with the expected nb of IBD per bin for each combination of t and admix."""
-        t = np.asarray(t)
-        admix = np.asarray(admix)
-        lengths_ancestral = np.asarray(lengths_ancestral)
 
-        # discretization and cumsums approximatimg integrals from l to inf
-        bin_sizes = bins[1:] - bins[:-1]
-        bin_mids = (bins[:-1] + bins[1:]) / 2
-        x0 = np.histogram(lengths_ancestral, bins=bins, density=False)[0] / nb_pairs_ancestral
-        cumsum1 = x0 * bin_sizes
-        cumsum1 = np.cumsum(cumsum1[::-1])[::-1]
-        cumsum2 = x0 * bin_mids * bin_sizes
-        cumsum2 =  np.cumsum(cumsum2[::-1])[::-1]
+# TODO: check the factors (nb of meiosis between the parents/ between the two alleles of the individual...)
+def ibd_count_pedigree(bins, nb_meiosis: int, comm_anc: int = 1, chr_lgts=chromosome_lengthsM_human):
+    """Returns the expected number of IBD in a given interval, given their relatedness.
+    Args:
+        bins: tuple or array size (2,n) with bin edges [in Morgan]
+        nb_meiosis: length of the genealogic path between the two individuals
+        comm_anc: nb of such paths
+        chr_lgts: chromosome lengths [in Morgan]"""
+    p_coal = coalescence_prob_pedigree(nb_meiosis, comm_anc)
+    pdf = block_count(bins, nb_meiosis, chr_lgts)
+    return 4 * p_coal * pdf
 
-        res = np.exp(-bin_mids * t[:, np.newaxis]) * (x0 + (2*t[:, np.newaxis] - t[:, np.newaxis]**2 * bin_mids)*cumsum1 + t[:, np.newaxis]**2 * cumsum2)
-        res = res[:, np.newaxis, :] * admix[np.newaxis, :, np.newaxis]
-        return res
 
-# This version sums over all ancestral segments insted of first grouping them into bins.
-    def ibd_decay_new(
-        self,
-        t: np.ndarray,
-        admix: np.ndarray,
-        bins: np.ndarray,
-        lengths_ancestral: np.ndarray,
-        nb_pairs_ancestral: float,
-    ) -> np.ndarray:
-        """Returns the expected nb of IBD in each bin, for pairs of samples.
+#### IBD across generations
 
-        Args:
-            t: nb of generations between samples, shape (T,)
-            admix: admixture coefficients, shape (A,)
-            bins: bin edges, shape (B+1,)
-            lengths_ancestral: IBD lengths in ancestral population, shape (N,)
-            nb_pairs_ancestral: number of pairs in the ancestral population
+def ibd_decay(t: np.ndarray, admix: np.ndarray, bins: np.ndarray,
+                     lengths_ancestral: np.ndarray, nb_pairs_ancestral: float):
+    """Returns the expected number of IBD in each bin, resulting from the decay of
+    ancestral segments.
+    Args:
+        t: nb of generations between samples, shape (T,)
+        admix: admixture coefficients, shape (A,)
+        bins: bin edges, shape (B+1,)
+        lengths_ancestral: IBD lengths observed in ancestral population, shape (N,)
+        nb_pairs_ancestral: number of pairs observed in the ancestral population
+    Returns:
+        Array of shape (T, A, B) with expected IBD counts per bin.
+    """
+    t = np.asarray(t, dtype=float)                                  # (T,)
+    admix = np.asarray(admix, dtype=float)                          # (A,)
+    bins = np.asarray(bins, dtype=float)                            # (B,)
+    lengths_ancestral = np.asarray(lengths_ancestral, dtype=float)  # (N,)
 
-        Returns:
-            Array of shape (T, A, B) with expected IBD counts per bin.
-        """
-        t = np.asarray(t, dtype=float)           # (T,)
-        admix = np.asarray(admix, dtype=float)   # (A,)
-        lengths_ancestral = np.asarray(lengths_ancestral)
+    above = lengths_ancestral[np.newaxis, :] >= bins[:, np.newaxis]     # (B, N)
+    N_above = above.sum(axis=1)                                         # (B)
+    S_above = (above * lengths_ancestral[np.newaxis, :]).sum(axis=1)    # (B)
 
-        bin_lo = bins[:-1]   # (B,)
-        bin_hi = bins[1:]    # (B,)
-        bin_mids = (bin_lo + bin_hi) / 2.0       # (B,)
-        bin_sizes = bin_hi - bin_lo              # (B,)
+    t_b = np.outer(t, bins)                                             # (T, B)
+    integrand = np.exp(-t_b) * (np.outer(t, S_above) + (1-t_b) * N_above[np.newaxis, :])    # (T, B)
 
-        # Baseline: ancestral IBD density per bin, shape (B,)
-        x0 = np.histogram(lengths_ancestral, bins=bins)[0]
+    ibd_per_pair = integrand[:, :-1] - integrand[:, 1:]                 # (T, B-1)
 
-        # Precompute per-(bin, segment) quantities — shape (B, N)
-        overlap = np.clip(lengths_ancestral[np.newaxis, :] - bin_lo[:, np.newaxis],
-                        0.0, bin_sizes[:, np.newaxis])                      # (B, N)
-        slope = lengths_ancestral[np.newaxis, :] - bin_mids[:, np.newaxis]  # (B, N)
-
-        # Precompute per-(t, bin) decay — shape (T, B)
-        decay = np.exp(-np.outer(t, bin_mids))  # (T, B)
-
-        # decompose the integral two parts: one with the constant term (2*t) and one with the linear term (t^2 * slope)
-        A = overlap.sum(axis=1)                        # (B,)  — sum of overlaps
-        C = (slope * overlap).sum(axis=1)              # (B,)  — weighted sum
-        integral = 2 * np.outer(t, A) + np.outer(t**2, C)   # (T, B)
-
-        # Decay factor and combination with baseline
-        decay = np.exp(-bin_mids[np.newaxis, :] * t[:, np.newaxis])  # (T, B)
-        ibd_per_pair = decay * (x0[np.newaxis, :] + integral)        # (T, B)
-
-        # Scale by admixture: output shape (T, A, B)
-        return ibd_per_pair[:, np.newaxis, :] * admix[np.newaxis, :, np.newaxis] / nb_pairs_ancestral
-
-    def ibd_decay(self, t:np.ndarray, admix:np.ndarray, bins:np.ndarray, lengths_ancestral:np.ndarray, nb_pairs_ancestral:float, old_version=False):
-        if old_version:
-            return self.ibd_decay_old(t, admix, bins, lengths_ancestral, nb_pairs_ancestral)
-        else:
-            return self.ibd_decay_new(t, admix, bins, lengths_ancestral, nb_pairs_ancestral)
-
-class Estimator:
-    """Class implementing the most likelihood estimation."""
-    def __init__(self, chr_lgts=chromosome_lengthsM_human):
-        self.chr_lgts = chr_lgts
-
-    def log_likelihood_Ne(self, Ne: float, observed_length:np.ndarray, data_type:Literal['IBD', 'ROH'], nb_observations:float, bin: Tuple[float, float]) -> float:
-        """Calculates the log-likelihood for a given Ne, based on observed IBD/ROH lengths.
-        Computation is done assuming independence between segments, using a Poisson point process model.
-        Args:
-            Ne: effective population size.
-            observed_length: array containing the length of the observed IBD/ROH segments.
-            data_type: type of data, either 'IBD' or 'ROH'.
-            nb_observations: number of observations considered.
-            bin: tuple containing the lower and upper bounds for the length of the IBD/ROH segments to use.
-        """
-        calculator = Calculator(self.chr_lgts)
-        if data_type == 'IBD':
-            density_func = calculator.ibd_density_Ne
-            integrale_func = calculator.ibd_count_Ne
-        elif data_type == 'ROH':
-            density_func = calculator.roh_density_Ne
-            integrale_func = calculator.roh_count_Ne
-        else:
-            raise ValueError("data_type must be 'IBD' or 'ROH'")
-
-        observed_length = np.asarray(observed_length)
-        observed_length = observed_length[(observed_length > bin[0]) & (observed_length < bin[1])]
-        pdf_vals = density_func(observed_length, Ne)
-        return np.sum(np.log(pdf_vals + 1e-30)) - nb_observations * integrale_func(bin, Ne)
-
-    def estimate_Ne(self, observed_length:np.ndarray, data_type:Literal['IBD', 'ROH'], nb_observations:float, bin: Tuple[float, float],
-                Ne_bounds=(10, 10e6)
-            ) -> (float, (float, float)):
-        """Estimates Ne and a 95% confidence interval using the maximum log likelihood.
-        Args:
-            observed_length: array containing the length of the observed IBD/ROH segments.
-            data_type: type of data, either 'IBD' or 'ROH'.
-            nb_observations: number of observations considered.
-            bin: tuple containing the lower and upper bounds for the length of the IBD/ROH segments to use.
-        Returns:
-            The optimal Ne and the 95% confidence interval."""
-
-        res = minimize_scalar(lambda Ne: -self.log_likelihood_Ne(Ne, observed_length, data_type, nb_observations, bin), method='bounded', bounds=Ne_bounds)
-
-        # get 95% CI with Wilks' theorem
-        def root_func(Ne):
-            return res.fun + self.log_likelihood_Ne(Ne, observed_length, data_type, nb_observations, bin) + 3.84/2
-        ci_lower = brentq(root_func, Ne_bounds[0], res.x - 1e-5, xtol=1e-5)
-        ci_upper = brentq(root_func, res.x + 1e-5, Ne_bounds[1], xtol=1e-5)
-
-        return res.x, (ci_lower, ci_upper)
-
-    def log_likelihood_IBDecay(self, t:np.ndarray, admix:np.ndarray, bins:np.ndarray,
-                               lengths_ancestral:np.ndarray, nb_pairs_ancestral:float,
-                               lengths_between:np.ndarray, nb_pairs_between:float, old_version: bool=False) -> np.ndarray:
-        """Returns the log-likelihood of observing the data at time t since common ancestor.
-        Args:            t: time since common ancestor
-            admix: proportion of admixture from a source with no shared ancestry (ie no IBD)
-            bins: bins to discretize the IBD lengths
-            lengths_ancestral: IBD lengths in the ancestral population.
-            nb_pairs_ancestral: number of pairs in the ancestral population.
-            lengths_between: IBD lengths between the two populations.
-            nb_pairs_between: number of pairs between the two populations.
-        Returns:
-            A 2D array of shape (len(t), len(admix)) with the log-likelihood for each combination of t and admix."""
-        calculator = Calculator(self.chr_lgts)
-        expected = calculator.ibd_decay(t, admix, bins, lengths_ancestral, nb_pairs_ancestral, old_version=old_version)  # expected[time, admix, bin] per pair
-        xt = np.histogram(lengths_between, bins=bins, density=False)[0]  # observed IBD distribution between the two populations
-        ll = xt[np.newaxis, np.newaxis, :] * np.log(expected+1e-30) - nb_pairs_between * expected # ll[time, admix, bin]
-        ll = np.sum(ll, axis=2)  # ll[time, admix]
-        ll -= np.max(ll)
-        return ll
-
-    def estimate_IBDecay(self, t_grid:np.ndarray, admix_grid:np.ndarray, bins:np.ndarray,
-                         lengths_ancestral:np.ndarray, nb_pairs_ancestral:float,
-                         lengths_between:np.ndarray, nb_pairs_between:float, old_version: bool=False) -> (float, float, np.ndarray):
-        """Returns the optimal t and admix that maximize the log-likelihood of observing the data.
-        Args:
-            t_grid: grid of time since common ancestor to test
-            admix_grid: grid of admixture proportion to test
-            bins: bins to discretize the IBD lengths
-            lengths_ancestral: IBD lengths in the ancestral population.
-            nb_pairs_ancestral: number of pairs in the ancestral time.
-            lengths_between: IBD lengths between the two populations.
-            nb_pairs_between: number of pairs between the two populations.
-        Returns:
-            The optimal t, the optimal admix, and the log-likelihood for each combination of t and admix."""
-        ll = self.log_likelihood_IBDecay(t_grid, admix_grid, bins, lengths_ancestral, nb_pairs_ancestral, lengths_between, nb_pairs_between, old_version=old_version)
-        time_opt, admix_opt = np.unravel_index(np.argmax(ll), ll.shape)
-        time_opt = t_grid[time_opt]
-        admix_opt = admix_grid[admix_opt]
-        return time_opt, admix_opt, ll
+    return ibd_per_pair[:, np.newaxis, :] * admix[np.newaxis, :, np.newaxis] / nb_pairs_ancestral   # (T, A, B-1)
