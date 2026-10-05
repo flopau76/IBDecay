@@ -58,6 +58,7 @@ def roh_lengths():
     df = simulate_roh(
         n_sim=N_SIM_ROH, min_l=MIN_L, max_t=MAX_T, Ne=NE, chr_lgts=CHR_LGTS, seed=1
     )
+    assert df is not None
     return df["lengthM"].to_numpy(dtype=float)
 
 
@@ -67,6 +68,7 @@ def ibd_lengths():
     df = simulate_ibd(
         n_sim=N_SIM_IBD, min_l=MIN_L, max_t=MAX_T, Ne=NE, chr_lgts=CHR_LGTS, seed=2
     )
+    assert df is not None
     return df["lengthM"].to_numpy(dtype=float)
 
 
@@ -83,6 +85,7 @@ def ibd_lengths_decayed():
         t2=T_DECAY,
         seed=3,
     )
+    assert df is not None
     return df["lengthM"].to_numpy(dtype=float)
 
 

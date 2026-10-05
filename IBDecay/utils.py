@@ -67,7 +67,7 @@ class DataHandler:
         """Filter the subset of iids whose dating correspond to the given time_range, based on the metadata.
         If strict, the mean date must be within the range.
         If not strict, the dating range must overlap with the given time_range."""
-        dates = self.df_meta[["iid", "date"]][self.df_meta["iid"].isin(iids)]
+        dates = self.df_meta.loc[self.df_meta["iid"].isin(iids), ["iid", "date"]]
         dates[["min", "max"]] = dates["date"].str.split(":", expand=True).astype(float)
         dates["mean"] = dates[["min", "max"]].mean(axis=1)
 
@@ -88,7 +88,10 @@ class DataHandler:
         return set(self.df_meta[self.df_meta["iid"].str.startswith(site)]["iid"])
 
     def get_ibd_iids(
-        self, iids1, iids2=None, filter_rel=("sum_IBD>12", 0, 100)
+        self,
+        iids1,
+        iids2=None,
+        filter_rel: tuple[str, float, float] | None = ("sum_IBD>12", 0, 100),
     ) -> tuple[int, pd.DataFrame]:
         """Returns the IBD segments between two sets of iids, and the number of individual pairs concerned."""
         iids1 = self.filter_iids_meta(iids1)
@@ -100,11 +103,14 @@ class DataHandler:
         nb_pairs += len(iids1 - iids2) * len(iids2 - iids1)
 
         # subset on pairs of concerned individuals
-        subset = self.df_ibd_ind[
-            (self.df_ibd_ind["iid1"].isin(iids1) & self.df_ibd_ind["iid2"].isin(iids2))
+        subset = self.df_ibd_ind.loc[
+            (
+                self.df_ibd_ind["iid1"].isin(list(iids1))
+                & self.df_ibd_ind["iid2"].isin(list(iids2))
+            )
             | (
-                self.df_ibd_ind["iid1"].isin(iids2)
-                & self.df_ibd_ind["iid2"].isin(iids1)
+                self.df_ibd_ind["iid1"].isin(list(iids2))
+                & self.df_ibd_ind["iid2"].isin(list(iids1))
             )
         ]
 
@@ -112,8 +118,8 @@ class DataHandler:
         subset_filtered = subset[["iid1", "iid2"]]
         if filter_rel is not None:
             col, _min, _max = filter_rel
-            subset_filtered = subset[["iid1", "iid2"]][
-                (subset[col].between(_min, _max))
+            subset_filtered = subset.loc[
+                subset[col].between(_min, _max), ["iid1", "iid2"]
             ]
         nb_removed = len(subset) - len(subset_filtered)
 
@@ -130,7 +136,10 @@ class DataHandler:
         return nb_pairs, df_ibd_filtered
 
     def get_ibd_sites(
-        self, site1: str, site2: str | None = None, filter_rel=("sum_IBD>12", 0, 100)
+        self,
+        site1: str,
+        site2: str | None = None,
+        filter_rel: tuple[str, float, float] | None = ("sum_IBD>12", 0, 100),
     ) -> tuple[int, pd.DataFrame]:
         """Returns the IBD segments between two sites, and the number of individual pairs concerned."""
         iids1 = self.get_iids_site(site1)

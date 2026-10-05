@@ -1,6 +1,6 @@
 """Maximum-likelihood estimation of Ne and IBD-decay (time/admixture) parameters."""
 
-from typing import Literal, NamedTuple
+from typing import Literal, NamedTuple, cast
 
 import numpy as np
 from scipy.optimize import OptimizeResult, brentq, minimize_scalar
@@ -100,8 +100,9 @@ def estimate_Ne(
             )
         )
 
-    ci_lower = brentq(root_func, Ne_bounds[0], res.x - 1e-5, xtol=1e-5)
-    ci_upper = brentq(root_func, res.x + 1e-5, Ne_bounds[1], xtol=1e-5)
+    # brentq returns a float unless full_output=True
+    ci_lower = cast(float, brentq(root_func, Ne_bounds[0], res.x - 1e-5, xtol=1e-5))
+    ci_upper = cast(float, brentq(root_func, res.x + 1e-5, Ne_bounds[1], xtol=1e-5))
 
     return res.x, (ci_lower, ci_upper)
 

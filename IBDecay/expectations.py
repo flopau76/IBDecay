@@ -1,6 +1,7 @@
 """Functions to compute expected ROH/IBD distributions, counts, and sums."""
 
 import numpy as np
+from numpy.typing import ArrayLike
 
 from IBDecay.utils import chromosome_lengthsM_human
 
@@ -220,10 +221,10 @@ def ibd_count_pedigree(
 
 
 def ibd_decay(
-    t: np.ndarray,
-    admix: np.ndarray,
-    bins: np.ndarray,
-    lengths_ancestral: np.ndarray,
+    t: ArrayLike,
+    admix: ArrayLike,
+    bins: ArrayLike,
+    lengths_ancestral: ArrayLike,
     nb_pairs_ancestral: float,
 ):
     """Returns the expected number of IBD in each bin, resulting from the decay of

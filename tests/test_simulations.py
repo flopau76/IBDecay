@@ -34,6 +34,7 @@ class TestSimulateRoh:
             max_t=SMALL_MAX_T,
             seed=1,
         )
+        assert df is not None
         assert set(df.columns) >= self.REQUIRED_ROH_COLUMNS
 
     def test_same_seed_is_reproducible(self):
@@ -91,6 +92,7 @@ class TestSimulateIbd:
             max_t=SMALL_MAX_T,
             seed=1,
         )
+        assert df is not None
         assert set(df.columns) >= self.REQUIRED_IBD_COLUMNS
 
     def test_same_seed_is_reproducible(self):
