@@ -1,95 +1,137 @@
-#___________________________________________________
+# ___________________________________________________
 # Necessary imports
-#___________________________________________________
+# ___________________________________________________
 
-import pandas as pd
-import numpy as np
-
+from collections.abc import Sequence
 from typing import Literal
 
-chromosome_lengthsM_human = (2.8426, 2.688187, 2.232549, 2.14201, 2.040477, 1.917145, 1.871491, 1.680018, 
-            1.661367, 1.8090949, 1.5821669, 1.745901, 1.2551429, 1.1859521, 1.413411, 
-            1.340264, 1.2849959, 1.175495, 1.0772971, 1.082123, 0.636394, 0.724438)
+import numpy as np
+import pandas as pd
+
+chromosome_lengthsM_human = (
+    2.8426,
+    2.688187,
+    2.232549,
+    2.14201,
+    2.040477,
+    1.917145,
+    1.871491,
+    1.680018,
+    1.661367,
+    1.8090949,
+    1.5821669,
+    1.745901,
+    1.2551429,
+    1.1859521,
+    1.413411,
+    1.340264,
+    1.2849959,
+    1.175495,
+    1.0772971,
+    1.082123,
+    0.636394,
+    0.724438,
+)
 
 # inbreeding defined by (nb of meiosis, nb of common ancestors)
 pedigree_dict = {
-    'FS': (4, 2, 'Full Siblings'),
-    'HS': (4, 1, 'Half Siblings'),
-    'AV': (5, 2, 'Aunt/Nephew'),
-    'C1': (6, 2, 'First Cousins'),
-    'C2': (8, 2, 'Second Cousins'),
-    'C3': (10, 2, 'Third Cousins'),
-    'PO': (3, 1, 'Parent/Offspring')
+    "FS": (4, 2, "Full Siblings"),
+    "HS": (4, 1, "Half Siblings"),
+    "AV": (5, 2, "Aunt/Nephew"),
+    "C1": (6, 2, "First Cousins"),
+    "C2": (8, 2, "Second Cousins"),
+    "C3": (10, 2, "Third Cousins"),
+    "PO": (3, 1, "Parent/Offspring"),
 }
 
-#___________________________________________________
+# ___________________________________________________
 # Data manipulation
-#___________________________________________________
+# ___________________________________________________
+
 
 class DataHandler:
-    def __init__(self, df_meta: pd.DataFrame, df_ibd: pd.DataFrame, df_ibd_ind: pd.DataFrame):
+    def __init__(
+        self, df_meta: pd.DataFrame, df_ibd: pd.DataFrame, df_ibd_ind: pd.DataFrame
+    ):
         self.df_meta = df_meta
         self.df_ibd = df_ibd
         self.df_ibd_ind = df_ibd_ind
 
     def filter_iids_meta(self, iids) -> set[str]:
         """Return the subset of iids present in the metadata."""
-        return set(self.df_meta[self.df_meta['iid'].isin(iids)]['iid'])
+        return set(self.df_meta[self.df_meta["iid"].isin(iids)]["iid"])
 
-    def filter_time(self, iids, min_date:int, max_date:int, strict:bool=False) -> set[str]:
+    def filter_time(
+        self, iids, min_date: int, max_date: int, strict: bool = False
+    ) -> set[str]:
         """Filter the subset of iids whose dating correspond to the given time_range, based on the metadata.
         If strict, the mean date must be within the range.
         If not strict, the dating range must overlap with the given time_range."""
-        dates = self.df_meta[['iid', 'date']][self.df_meta['iid'].isin(iids)]
-        dates[['min', 'max']] = dates['date'].str.split(':', expand=True).astype(float)
-        dates['mean'] = dates[['min', 'max']].mean(axis=1)
+        dates = self.df_meta[["iid", "date"]][self.df_meta["iid"].isin(iids)]
+        dates[["min", "max"]] = dates["date"].str.split(":", expand=True).astype(float)
+        dates["mean"] = dates[["min", "max"]].mean(axis=1)
 
         if strict:
             # individuals whose mean datation is within the time_range
-            valid = ( (dates['min'] <= max_date) & (dates['max'] >= min_date) )
+            valid = (dates["min"] <= max_date) & (dates["max"] >= min_date)
         else:
             # individuals whose timespan overlaps with the given time_range
-            valid = ( (dates['min'] >= min_date) & (dates['min'] <= max_date) ) | \
-                    ( (dates['max'] >= min_date) & (dates['max'] <= max_date) ) | \
-                    ( (dates['min'] <= min_date) & (dates['max'] >= max_date) )
-        return set(dates['iid'][valid])
+            valid = (
+                ((dates["min"] >= min_date) & (dates["min"] <= max_date))
+                | ((dates["max"] >= min_date) & (dates["max"] <= max_date))
+                | ((dates["min"] <= min_date) & (dates["max"] >= max_date))
+            )
+        return set(dates["iid"][valid])
 
-    def get_iids_site(self, site:str) -> set[str]:
+    def get_iids_site(self, site: str) -> set[str]:
         """Returns the iids corresponding to a given site, based on the metadata."""
-        return set(self.df_meta[self.df_meta['iid'].str.startswith(site)]['iid'])
+        return set(self.df_meta[self.df_meta["iid"].str.startswith(site)]["iid"])
 
-    def get_ibd_iids(self, iids1, iids2=None, filter_rel=("sum_IBD>12", 0, 100)) -> tuple[int, pd.DataFrame]:
+    def get_ibd_iids(
+        self, iids1, iids2=None, filter_rel=("sum_IBD>12", 0, 100)
+    ) -> tuple[int, pd.DataFrame]:
         """Returns the IBD segments between two sets of iids, and the number of individual pairs concerned."""
         iids1 = self.filter_iids_meta(iids1)
         iids2 = iids1 if iids2 is None else self.filter_iids_meta(iids2)
 
         # compute nb of pairs
         size_intersec = len(iids1 & iids2)
-        nb_pairs = size_intersec*(size_intersec-1)//2
-        nb_pairs += len(iids1-iids2) * len(iids2-iids1)
+        nb_pairs = size_intersec * (size_intersec - 1) // 2
+        nb_pairs += len(iids1 - iids2) * len(iids2 - iids1)
 
         # subset on pairs of concerned individuals
         subset = self.df_ibd_ind[
-                (self.df_ibd_ind['iid1'].isin(iids1) & self.df_ibd_ind['iid2'].isin(iids2)) |
-                (self.df_ibd_ind['iid1'].isin(iids2) & self.df_ibd_ind['iid2'].isin(iids1))
-            ]
+            (self.df_ibd_ind["iid1"].isin(iids1) & self.df_ibd_ind["iid2"].isin(iids2))
+            | (
+                self.df_ibd_ind["iid1"].isin(iids2)
+                & self.df_ibd_ind["iid2"].isin(iids1)
+            )
+        ]
 
         # filter out close relatives
-        subset_filtered = subset[['iid1', 'iid2']]
+        subset_filtered = subset[["iid1", "iid2"]]
         if filter_rel is not None:
             col, _min, _max = filter_rel
-            subset_filtered = subset[['iid1', 'iid2']][(subset[col].between(_min, _max))]
+            subset_filtered = subset[["iid1", "iid2"]][
+                (subset[col].between(_min, _max))
+            ]
         nb_removed = len(subset) - len(subset_filtered)
 
-        if nb_removed > 0 :
-            print(f"Removed {nb_removed}/{len(subset)} close pairs based on criterium filter_rel={filter_rel}")
+        if nb_removed > 0:
+            print(
+                f"Removed {nb_removed}/{len(subset)} close pairs based on criterium filter_rel={filter_rel}"
+            )
         nb_pairs -= nb_removed
 
-        df_ibd_filtered = self.df_ibd.merge(subset_filtered, on=['iid1', 'iid2'], how='inner')
+        df_ibd_filtered = self.df_ibd.merge(
+            subset_filtered, on=["iid1", "iid2"], how="inner"
+        )
 
         return nb_pairs, df_ibd_filtered
 
-    def get_ibd_sites(self, site1: str, site2: str|None=None, filter_rel=("sum_IBD>12", 0, 100)) -> tuple[int, pd.DataFrame]:
+    def get_ibd_sites(
+        self, site1: str, site2: str | None = None, filter_rel=("sum_IBD>12", 0, 100)
+    ) -> tuple[int, pd.DataFrame]:
         """Returns the IBD segments between two sites, and the number of individual pairs concerned."""
         iids1 = self.get_iids_site(site1)
         if site2 is None:
@@ -98,10 +140,16 @@ class DataHandler:
             iids2 = self.get_iids_site(site2)
         return self.get_ibd_iids(iids1, iids2, filter_rel)
 
-#___________________________________________________
+
+# ___________________________________________________
 # Summary Stats:
-#___________________________________________________
-def create_stats(df:pd.DataFrame, L=[8,12,16,20], data_type:Literal['IBD', 'ROH']='IBD', save:None|str=None) -> pd.DataFrame:
+# ___________________________________________________
+def create_stats(
+    df: pd.DataFrame,
+    L: Sequence[int] = (8, 12, 16, 20),
+    data_type: Literal["IBD", "ROH"] = "IBD",
+    save: None | str = None,
+) -> pd.DataFrame:
     """Compute summary stats from a dataframe containing IBD or ROH segments. For each individual (ROH) or pair of individuals (IBD), compute the maximum segment length, the number of segments longer than L, and the sum of segment lengths longer than L.
     Args:
         df: Dataframe containing the IBD or ROH segments. Must contain columns 'iid1', 'iid2' (for IBD) or 'iid' (for ROH), and 'lengthM'.
@@ -111,16 +159,16 @@ def create_stats(df:pd.DataFrame, L=[8,12,16,20], data_type:Literal['IBD', 'ROH'
     Returns:
         Dataframe containing the summary stats for each individual (ROH) or pair of individuals (IBD).
     """
-    if data_type == 'IBD':
-        id_col = ['iid1', 'iid2']
-    elif data_type == 'ROH':
-        id_col = ['iid']
+    if data_type == "IBD":
+        id_col = ["iid1", "iid2"]
+    elif data_type == "ROH":
+        id_col = ["iid"]
     else:
         raise ValueError("data_type must be 'IBD' or 'ROH'")
     df_stats = pd.DataFrame()
     df_stats["max"] = df.groupby(id_col, observed=False)["lengthM"].max()
     for n in L:
-        groups = df.loc[df['lengthM'] > 0.01*n].groupby(id_col, observed=False)
+        groups = df.loc[df["lengthM"] > 0.01 * n].groupby(id_col, observed=False)
         n_roh = groups.size()
         sum_roh = groups["lengthM"].sum() * 100
         df_stats[f"n_{data_type}>{n}"] = n_roh
@@ -131,11 +179,15 @@ def create_stats(df:pd.DataFrame, L=[8,12,16,20], data_type:Literal['IBD', 'ROH'
         df_stats.to_csv(save, index=False)
     return df_stats
 
-#___________________________________________________
-# Post-proessing:
-#___________________________________________________
 
-def merge_roh(df_roh: pd.DataFrame, min_l1: float, min_l2: float, max_gap: float) -> pd.DataFrame:
+# ___________________________________________________
+# Post-proessing:
+# ___________________________________________________
+
+
+def merge_roh(
+    df_roh: pd.DataFrame, min_l1: float, min_l2: float, max_gap: float
+) -> pd.DataFrame:
     """Merge ROH segments that are separated by a gap smaller than max_gap (in cM),
     only if the shorter segment >= min_l1 and the longer segment >= min_l2."""
 
@@ -147,20 +199,30 @@ def merge_roh(df_roh: pd.DataFrame, min_l1: float, min_l2: float, max_gap: float
     l_prev = df_roh["lengthM"].shift(1)
     l_curr = df_roh["lengthM"]
     l_short = np.minimum(l_prev, l_curr)
-    l_long  = np.maximum(l_prev, l_curr)
+    l_long = np.maximum(l_prev, l_curr)
 
-    merge = (gap <= max_gap) & (l_short >= min_l1) & (l_long >= min_l2) & (df_roh["ch"] == df_roh["ch"].shift(1)) & (df_roh["iid"] == df_roh["iid"].shift(1))
+    merge = (
+        (gap <= max_gap)
+        & (l_short >= min_l1)
+        & (l_long >= min_l2)
+        & (df_roh["ch"] == df_roh["ch"].shift(1))
+        & (df_roh["iid"] == df_roh["iid"].shift(1))
+    )
 
     df_roh["segment_id"] = (~merge).cumsum()
 
-    merged = df_roh.groupby(["segment_id"], observed=False).agg(
-        iid=("iid", "first"),
-        ch=("ch", "first"),
-        StartM=("StartM", "first"),
-        EndM=("EndM", "last"),
-        StartBP=("StartBP", "first"),
-        EndBP=("EndBP", "last")
-    ).reset_index()
+    merged = (
+        df_roh.groupby(["segment_id"], observed=False)
+        .agg(
+            iid=("iid", "first"),
+            ch=("ch", "first"),
+            StartM=("StartM", "first"),
+            EndM=("EndM", "last"),
+            StartBP=("StartBP", "first"),
+            EndBP=("EndBP", "last"),
+        )
+        .reset_index()
+    )
 
     merged["lengthM"] = merged["EndM"] - merged["StartM"]
     merged["lengthBP"] = merged["EndBP"] - merged["StartBP"]

@@ -1,7 +1,8 @@
-"""Verify that the module simulations creates ROH/IBD results with the correct format"""
+"""Verify that the module simulations creates ROH/IBD results in the correct format"""
 
 import pandas as pd
 import pytest
+
 from IBDecay.simulations import (
     simulate_ibd,
     simulate_roh,

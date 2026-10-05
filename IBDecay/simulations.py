@@ -1,14 +1,17 @@
-from IBDecay.utils import chromosome_lengthsM_human
-
+import os
+import warnings
 from collections.abc import Sequence
 
-import os
-import msprime, tskit
+import msprime
 import pandas as pd
-import warnings
+import tskit
+
+from IBDecay.utils import chromosome_lengthsM_human
 
 
-def _resolve_demography(demography: msprime.Demography | None, Ne: int) -> msprime.Demography:
+def _resolve_demography(
+    demography: msprime.Demography | None, Ne: int
+) -> msprime.Demography:
     """Build the default constant-size demography if none is given."""
     if demography is not None:
         return demography
@@ -32,14 +35,18 @@ def _prepare_save_path(save_path: str, overwrite: bool) -> None:
         os.remove(save_path)
 
 
-def _get_roh_from_tree_seq(tree_sequence: tskit.TreeSequence, min_l: float) -> pd.DataFrame:
+def _get_roh_from_tree_seq(
+    tree_sequence: tskit.TreeSequence, min_l: float
+) -> pd.DataFrame:
     """Extract IBD/ROH segments (length [Morgan] and TMRCA [generations]) between the two samples of a tree sequence."""
     ibd = tree_sequence.ibd_segments(min_span=min_l, store_segments=True).get((0, 1))
     if ibd is None:
         return pd.DataFrame(columns=["StartM", "EndM", "lengthM", "tmrca"])
     tmrca = tree_sequence.nodes_time[ibd.node]
     lengths = ibd.right - ibd.left
-    return pd.DataFrame({"StartM":ibd.left, "EndM": ibd.right, "lengthM": lengths, "tmrca": tmrca})
+    return pd.DataFrame(
+        {"StartM": ibd.left, "EndM": ibd.right, "lengthM": lengths, "tmrca": tmrca}
+    )
 
 
 def simulate_roh(
@@ -95,8 +102,11 @@ def simulate_roh(
         # Simulate n_sim independent replicates of a single diploid individual's
         # ancestry for this chromosome in one call, instead of one call per replicate.
         replicates = msprime.sim_ancestry(
-            samples=1, demography=demography,
-            ploidy=2, sequence_length=chr_l, discrete_genome=False,
+            samples=1,
+            demography=demography,
+            ploidy=2,
+            sequence_length=chr_l,
+            discrete_genome=False,
             recombination_rate=1,
             end_time=max_t,
             num_replicates=n_sim,
@@ -108,7 +118,12 @@ def simulate_roh(
             df["iid"] = sim_id
             df["chr"] = chr_id
             if save_path is not None:
-                df.to_csv(save_path, index=False, header=(sim_id == 0 and chr_id == 0), mode="a")
+                df.to_csv(
+                    save_path,
+                    index=False,
+                    header=(sim_id == 0 and chr_id == 0),
+                    mode="a",
+                )
             else:
                 df_all.append(df)
 
@@ -172,17 +187,22 @@ def simulate_ibd(
         _prepare_save_path(save_path, overwrite)
 
     samples = (
-            msprime.SampleSet(1, population=pop1, ploidy=ploidy, time=t1),
-            msprime.SampleSet(1, population=pop2, ploidy=ploidy, time=t2),
-        )
+        msprime.SampleSet(1, population=pop1, ploidy=ploidy, time=t1),
+        msprime.SampleSet(1, population=pop2, ploidy=ploidy, time=t2),
+    )
 
     df_all = []
     n_chr = len(chr_lgts)
     for chr_id, chr_l in enumerate(chr_lgts):
-        print(f"Simulating {n_sim} pairs for chromosome {chr_id + 1}/{n_chr}", flush=True)
+        print(
+            f"Simulating {n_sim} pairs for chromosome {chr_id + 1}/{n_chr}", flush=True
+        )
         replicates = msprime.sim_ancestry(
-            samples=samples, demography=demography,
-            ploidy=ploidy, sequence_length=chr_l, discrete_genome=False,
+            samples=samples,
+            demography=demography,
+            ploidy=ploidy,
+            sequence_length=chr_l,
+            discrete_genome=False,
             recombination_rate=1,
             end_time=max_t,
             num_replicates=n_sim,
@@ -202,8 +222,14 @@ def simulate_ibd(
                     df["chrom_2"] = chrom_2
                     if save_path is not None:
                         df.to_csv(
-                            save_path, index=False,
-                            header=(sim_id == 0 and chr_id == 0 and chrom_1 == 0 and chrom_2 == 0),
+                            save_path,
+                            index=False,
+                            header=(
+                                sim_id == 0
+                                and chr_id == 0
+                                and chrom_1 == 0
+                                and chrom_2 == 0
+                            ),
                             mode="a",
                         )
                     else:

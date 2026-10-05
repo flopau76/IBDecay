@@ -1,43 +1,52 @@
-from matplotlib.ticker import FixedLocator, FuncFormatter
+from collections.abc import Sequence
+from typing import Literal
 
-from IBDecay.utils import chromosome_lengthsM_human
-from IBDecay.expectations import roh_density_Ne, ibd_density_Ne, ibd_decay
-
-from typing import Literal, Sequence
-
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import matplotlib.patheffects as pe
-from matplotlib.patches import Patch
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 from matplotlib.axes import Axes
 from matplotlib.markers import MarkerStyle
+from matplotlib.patches import Patch
+from matplotlib.ticker import FixedLocator, FuncFormatter
+
+from IBDecay.expectations import ibd_decay, ibd_density_Ne, roh_density_Ne
+from IBDecay.utils import chromosome_lengthsM_human
+
 
 def get_cmap_colors(n, cmap_name="viridis_r") -> list:
     """Return a list of `n` colors folowing a pyplot colormap"""
     cmap = plt.get_cmap(cmap_name)
     colors = [mcolors.to_hex(cmap(i / (n - 1))) for i in range(n)] if n > 1 else ["k"]
     return colors
-#___________________________________________________
+
+
+# ___________________________________________________
 # Histograms at population levels
-#___________________________________________________
-def _plot_histo_format(ax:Axes, bins:Sequence[float]):
+# ___________________________________________________
+def _plot_histo_format(ax: Axes, bins: Sequence[float]):
     """Format the histogram plot."""
-    ax.set_xlim(bins[0], bins[-1]+(bins[1]-bins[0]))
-    ax.set_yscale('log')
+    ax.set_xlim(bins[0], bins[-1] + (bins[1] - bins[0]))
+    ax.set_yscale("log")
     n_major = 6
     step = max(1, len(bins) // n_major)
     ax.xaxis.set_major_locator(FixedLocator(bins[::step]))
     ax.xaxis.set_minor_locator(FixedLocator(bins))
-    ax.xaxis.set_major_formatter(FuncFormatter(lambda x, _: f'{x * 100:.4g}'))
+    ax.xaxis.set_major_formatter(FuncFormatter(lambda x, _: f"{x * 100:.4g}"))
 
-def plot_histo(observed_length:np.ndarray, nb_normalize: int=1, bins=np.arange(0.08, 0.30, 0.005),
-        data_type:Literal['IBD', 'ROH']='IBD', Ne:list[int]=[1500, 3000, 5000],
-        ax:None|Axes=None,
-        chr_lgts=chromosome_lengthsM_human,
-        Ne_colors:None|list=None, histo_kwargs:dict={"color": "sandybrown", "edgecolor": "gray", "alpha": 1}
-    ):
+
+def plot_histo(
+    observed_length: np.ndarray,
+    nb_normalize: int = 1,
+    bins=np.arange(0.08, 0.30, 0.005),
+    data_type: Literal["IBD", "ROH"] = "IBD",
+    Ne: Sequence[int] = (1500, 3000, 5000),
+    ax: None | Axes = None,
+    chr_lgts=chromosome_lengthsM_human,
+    Ne_colors: None | list = None,
+    histo_kwargs: dict | None = None,
+):
     """Plot data histogram.
     Args:
         observed_length: array containing the segment lengths [Morgans]
@@ -47,7 +56,14 @@ def plot_histo(observed_length:np.ndarray, nb_normalize: int=1, bins=np.arange(0
         Ne: List of effective population sizes to plot the expected lines for.
         chr_lgts: Chromosome lengths [in Morgan] used to compute the expected lines.
         Ne_colors: Colors used to plot the expected line for each Ne.
-        histo_kwargs: Keyword arguments passed to ax.hist for the histogram."""
+        histo_kwargs: Keyword arguments passed to ax.hist for the histogram, merged over the defaults."""
+
+    histo_kwargs = {
+        "color": "sandybrown",
+        "edgecolor": "gray",
+        "alpha": 1,
+        **(histo_kwargs or {}),
+    }
 
     # Format the plot
     if ax is None:
@@ -55,56 +71,98 @@ def plot_histo(observed_length:np.ndarray, nb_normalize: int=1, bins=np.arange(0
     else:
         fig = ax.get_figure()
     ax.set_xlabel(f"Binned {data_type} length (cM)")
-    ax.set_ylabel(f"Average {data_type} per {'pair' if data_type=='IBD' else 'individual'} and bin")
+    ax.set_ylabel(
+        f"Average {data_type} per {'pair' if data_type == 'IBD' else 'individual'} and bin"
+    )
     _plot_histo_format(ax, bins)
 
     if Ne_colors is None:
         Ne_colors = get_cmap_colors(len(Ne))
 
     # Plot the actual histogram
-    ax.hist(observed_length, bins=bins, weights=np.full(len(observed_length), 1/nb_normalize), **histo_kwargs)
+    ax.hist(
+        observed_length,
+        bins=bins,
+        weights=np.full(len(observed_length), 1 / nb_normalize),
+        **histo_kwargs,
+    )
 
     # Plot the expected histogram for a constant Ne
-    segment_density_func = ibd_density_Ne if data_type=='IBD' else roh_density_Ne
+    segment_density_func = ibd_density_Ne if data_type == "IBD" else roh_density_Ne
     x = np.linspace(bins[0], bins[-1], 1000)
     bin_width = bins[1] - bins[0]
     for N, c in zip(Ne, Ne_colors):
         y = bin_width * segment_density_func(x, N, chr_lgts)
-        ax.plot(x, y, color=c, linestyle='dashed', scaley=False)
-        ax.text(x[100], y[100], f"Ne={int(N)}", color='black')
+        ax.plot(x, y, color=c, linestyle="dashed", scaley=False)
+        ax.text(x[100], y[100], f"Ne={int(N)}", color="black")
 
     return fig, ax
 
-def plot_histo_two_sites(length_site1:np.ndarray, length_site2:np.ndarray, length_between:np.ndarray,
-                        nb_pairs1: int=1, nb_pairs2: int=1, nb_pairs_between: int=1,
-                        bins=np.arange(0.08, 0.30, 0.005),
-                        Ne:list[int]=[1500, 3000, 5000], delta_t:list[int]=[10, 20, 50],
-                        name_site1:str="Site 1", name_site2:str="Site 2",
-                        chr_lgts=chromosome_lengthsM_human,
-                        Ne_colors:None|list=None, delta_t_colors:None|list=None,
-                        kwargs_sites = {"color": ["#f5b066", "#66d0f2"], "edgecolor": None},
-                        kwargs_between = {"fill": False, "hatch": "/", "edgecolor": "k"}
-    ):
+
+def plot_histo_two_sites(
+    length_site1: np.ndarray,
+    length_site2: np.ndarray,
+    length_between: np.ndarray,
+    nb_pairs1: int = 1,
+    nb_pairs2: int = 1,
+    nb_pairs_between: int = 1,
+    bins=np.arange(0.08, 0.30, 0.005),
+    Ne: Sequence[int] = (1500, 3000, 5000),
+    delta_t: Sequence[int] = (10, 20, 50),
+    name_site1: str = "Site 1",
+    name_site2: str = "Site 2",
+    chr_lgts=chromosome_lengthsM_human,
+    Ne_colors: None | list = None,
+    delta_t_colors: None | list = None,
+    kwargs_sites: dict | None = None,
+    kwargs_between: dict | None = None,
+):
     """Plot IBD within and between two sites."""
+
+    kwargs_sites = {
+        "color": ["#f5b066", "#66d0f2"],
+        "edgecolor": None,
+        **(kwargs_sites or {}),
+    }
+    kwargs_between = {
+        "fill": False,
+        "hatch": "/",
+        "edgecolor": "k",
+        **(kwargs_between or {}),
+    }
 
     ### Format the plot
     fig, ax = plt.subplots()
-    ax.set_xlabel(f"Binned IBD length (cM)")
-    ax.set_ylabel(f"Average IBD per pair and bin")
+    ax.set_xlabel("Binned IBD length (cM)")
+    ax.set_ylabel("Average IBD per pair and bin")
     _plot_histo_format(ax, bins)
 
     if Ne_colors is None:
         Ne_colors = get_cmap_colors(len(Ne), cmap_name="inferno")
 
     if delta_t_colors is None:
-        delta_t_colors = get_cmap_colors(len(delta_t)-1, cmap_name="viridis_r") + ["k"]
+        delta_t_colors = get_cmap_colors(len(delta_t) - 1, cmap_name="viridis_r") + [
+            "k"
+        ]
 
     # Plot the observed histogram
-    ax.hist([length_site1, length_site2], bins=bins,
-            weights=[np.full(len(length_site1), 1/nb_pairs1), np.full(len(length_site2), 1/nb_pairs2)],
-            **kwargs_sites, label=[name_site1, name_site2])
-    ax.hist(length_between, bins=bins, weights=np.full(len(length_between), 1/nb_pairs_between),
-            **kwargs_between, label="Between")
+    ax.hist(
+        [length_site1, length_site2],
+        bins=bins,
+        weights=[
+            np.full(len(length_site1), 1 / nb_pairs1),
+            np.full(len(length_site2), 1 / nb_pairs2),
+        ],
+        **kwargs_sites,
+        label=[name_site1, name_site2],
+    )
+    ax.hist(
+        length_between,
+        bins=bins,
+        weights=np.full(len(length_between), 1 / nb_pairs_between),
+        **kwargs_between,
+        label="Between",
+    )
 
     x = np.linspace(bins[0], bins[-1], 1000)
     bin_width = bins[1] - bins[0]
@@ -113,23 +171,34 @@ def plot_histo_two_sites(length_site1:np.ndarray, length_site2:np.ndarray, lengt
     # Plot the expected histogram for a constant Ne
     for N, c in zip(Ne, Ne_colors):
         y = bin_width * ibd_density_Ne(x, N, chr_lgts)
-        ax.plot(x, y, color=c, linestyle='dashed', scaley=False)
-        ax.text(x[100], y[100], f"Ne={int(N)}", color='black')
+        ax.plot(x, y, color=c, linestyle="dashed", scaley=False)
+        ax.text(x[100], y[100], f"Ne={int(N)}", color="black")
 
     # Plot the expected histogram for different delta t
-    Y = ibd_decay(delta_t, [1], bins, length_site1, nb_pairs1)  # shape (len(delta_t), 1, len(bins)-1)
+    Y = ibd_decay(
+        delta_t, [1], bins, length_site1, nb_pairs1
+    )  # shape (len(delta_t), 1, len(bins)-1)
     for i, (dt, c) in enumerate(zip(delta_t, delta_t_colors)):
-        ax.plot(bin_mids, Y[i, 0, :], color=c, scaley=False)    # , label=f"Δt={dt}"
-        ax.text(bin_mids[-2], Y[i, 0, -2], f"Δt={dt}", color='black')
+        ax.plot(bin_mids, Y[i, 0, :], color=c, scaley=False)  # , label=f"Δt={dt}"
+        ax.text(bin_mids[-2], Y[i, 0, -2], f"Δt={dt}", color="black")
 
     ax.legend()
 
     return fig, ax
-#___________________________________________________
+
+
+# ___________________________________________________
 # Summary stats with one bar per individual
-#___________________________________________________
-def plot_summary_stats(df_stats:pd.DataFrame, L=[8,12,16,20], L_colors=["#313695", "#abd9e9", "#fee090", "#d7191c"],
-            legend:bool=True, x_ticks:None|str=None, y_ticks:bool=False, ax=None):
+# ___________________________________________________
+def plot_summary_stats(
+    df_stats: pd.DataFrame,
+    L: Sequence[int] = (8, 12, 16, 20),
+    L_colors=("#313695", "#abd9e9", "#fee090", "#d7191c"),
+    legend: bool = True,
+    x_ticks: None | str = None,
+    y_ticks: bool = False,
+    ax=None,
+):
     """Plot the distribution of roh summary stats as a bar plot.
     Args:
         df_stats can be obtained by running create_stats(df_roh, L)
@@ -148,12 +217,20 @@ def plot_summary_stats(df_stats:pd.DataFrame, L=[8,12,16,20], L_colors=["#313695
     data = df_stats[[f"sum_ROH>{n}" for n in L]].values
     x = np.arange(len(df_stats))
     bottom = np.zeros((len(df_stats), len(L)))
-    for i in range(1,len(L)):
-        bottom[:,i] = data[:,0]-data[:,i]
+    for i in range(1, len(L)):
+        bottom[:, i] = data[:, 0] - data[:, i]
 
     # Make plot for each bin
     for i in range(len(L)):
-        ax.bar(x, data[:,i], bottom=bottom[:,i], width=0.8, color=L_colors[i], edgecolor="black", label=f"{L[i]}-{L[i+1]} cM" if i<len(L)-1 else f">{L[i]} cM")
+        ax.bar(
+            x,
+            data[:, i],
+            bottom=bottom[:, i],
+            width=0.8,
+            color=L_colors[i],
+            edgecolor="black",
+            label=f"{L[i]}-{L[i + 1]} cM" if i < len(L) - 1 else f">{L[i]} cM",
+        )
 
     if legend:
         ax.legend(title="Sum of ROH in")
@@ -161,70 +238,131 @@ def plot_summary_stats(df_stats:pd.DataFrame, L=[8,12,16,20], L_colors=["#313695
         ax.set_xticks(x)
         ax.set_xticklabels(df_stats[x_ticks], rotation=270)
     else:
-        ax.tick_params(labelbottom = False)
-    ax.tick_params(axis='x', which='both', bottom=False, top=False)
+        ax.tick_params(labelbottom=False)
+    ax.tick_params(axis="x", which="both", bottom=False, top=False)
 
     if y_ticks:
         ax.set_ylabel("Cumulative length of ROH [cM]")
     else:
-        ax.tick_params(left = False, labelleft = False)
+        ax.tick_params(left=False, labelleft=False)
     ax.set_xlim(-1, len(df_stats))
 
     return fig, ax
 
-def plot_summary_stats_panel(df_stats:list[pd.DataFrame], L=[8,12,16,20], L_colors=["#313695", "#abd9e9", "#fee090", "#d7191c"], titles:list[str]=[],
-                    figsize=None, x_ticks:None|str=None):
+
+def plot_summary_stats_panel(
+    df_stats: list[pd.DataFrame],
+    L: Sequence[int] = (8, 12, 16, 20),
+    L_colors=("#313695", "#abd9e9", "#fee090", "#d7191c"),
+    titles: Sequence[str] = (),
+    figsize=None,
+    x_ticks: None | str = None,
+):
     """Plot the distribution of multiple roh summary stats into different panels.
     Args:
         df_stats: list of dataframes containing the stats to plot. Each dataframe can be obtained by running create_stats(df_roh, L) on a different subset of data (eg different subspecies
         titles: list of titles for each panel
         For other arguments, refer to plot_summary_stats()"""
     if figsize is None:
-        figsize = (6*len(df_stats),6)
-    fig, axes = plt.subplots(1, len(df_stats), figsize=figsize, sharey=True, width_ratios=[len(df) for df in df_stats])
+        figsize = (6 * len(df_stats), 6)
+    fig, axes = plt.subplots(
+        1,
+        len(df_stats),
+        figsize=figsize,
+        sharey=True,
+        width_ratios=[len(df) for df in df_stats],
+    )
     for i, df in enumerate(df_stats):
         title = titles[i] if i < len(titles) else ""
-        plot_summary_stats(df, L=L, L_colors=L_colors, legend=(i==len(df_stats)-1), x_ticks=x_ticks, y_ticks=(i==0), ax=axes[i])
+        plot_summary_stats(
+            df,
+            L=L,
+            L_colors=L_colors,
+            legend=(i == len(df_stats) - 1),
+            x_ticks=x_ticks,
+            y_ticks=(i == 0),
+            ax=axes[i],
+        )
         axes[i].set_title(title)
     return fig, axes
 
-#___________________________________________________
+
+# ___________________________________________________
 # Chromosome details at individual level
-#___________________________________________________
-def _plot_single_chromosome(ax:Axes, pos_x:float, chrom_length:float, df_RG, df_RG2, unit:Literal['BP', 'Morgans']='Morgans',
-                            color_1:str="maroon", color_2:str="saddlebrown"):
+# ___________________________________________________
+def _plot_single_chromosome(
+    ax: Axes,
+    pos_x: float,
+    chrom_length: float,
+    df_RG,
+    df_RG2,
+    unit: Literal["BP", "Morgans"] = "Morgans",
+    color_1: str = "maroon",
+    color_2: str = "saddlebrown",
+):
     """Plot a Chromosome of length l on ax"""
     # Plot settings
     width = 0.8
 
-    start_col = "StartBP" if unit=="BP" else "StartM"
-    end_col = "EndBP" if unit=="BP" else "EndM"
+    start_col = "StartBP" if unit == "BP" else "StartM"
+    end_col = "EndBP" if unit == "BP" else "EndM"
 
     # Convert width in axis coordinate to linewith in figure coordinate (nb of points)
     fig = ax.get_figure()
-    length = fig.bbox_inches.width * ax.get_position().width * 72    # 72=nb of points/inch
+    length = (
+        fig.bbox_inches.width * ax.get_position().width * 72
+    )  # 72=nb of points/inch
     lw = width * length / np.diff(ax.get_xlim())[0]
 
     ### Plot chromosome outline
-    ax.plot([pos_x, pos_x], [0, chrom_length], lw = lw, color="lightgray",
-                solid_capstyle = 'round', zorder=0,
-                path_effects=[pe.Stroke(linewidth=lw+3, foreground='k'), pe.Normal()])
+    ax.plot(
+        [pos_x, pos_x],
+        [0, chrom_length],
+        lw=lw,
+        color="lightgray",
+        solid_capstyle="round",
+        zorder=0,
+        path_effects=[pe.Stroke(linewidth=lw + 3, foreground="k"), pe.Normal()],
+    )
 
     ### Plot the dataframe if only one is given
     if df_RG2 is None:
-        ax.vlines(x=np.full(len(df_RG), pos_x), ymin=df_RG[start_col], ymax=df_RG[end_col], lw=lw, color=color_1)
+        ax.vlines(
+            x=np.full(len(df_RG), pos_x),
+            ymin=df_RG[start_col],
+            ymax=df_RG[end_col],
+            lw=lw,
+            color=color_1,
+        )
 
     ### Otherwise plot both dataframes next to each other
     else:
-        ax.vlines(x=np.full(len(df_RG), pos_x-0.25*width), ymin=df_RG[start_col], ymax=df_RG[end_col], lw=lw*0.45, color=color_1)
-        ax.vlines(x=np.full(len(df_RG2), pos_x+0.25*width), ymin=df_RG2[start_col], ymax=df_RG2[end_col], lw=lw*0.45, color=color_2)
+        ax.vlines(
+            x=np.full(len(df_RG), pos_x - 0.25 * width),
+            ymin=df_RG[start_col],
+            ymax=df_RG[end_col],
+            lw=lw * 0.45,
+            color=color_1,
+        )
+        ax.vlines(
+            x=np.full(len(df_RG2), pos_x + 0.25 * width),
+            ymin=df_RG2[start_col],
+            ymax=df_RG2[end_col],
+            lw=lw * 0.45,
+            color=color_2,
+        )
 
-def plot_all_chromosomes(df_roh:pd.DataFrame, df_roh2:pd.DataFrame|None=None,
-                        unit:Literal['BP', 'Morgans']='Morgans',
-                        legend:tuple|None=None,
-                        ax=None,
-                        chr_lgts=chromosome_lengthsM_human,
-                        color_1:str="maroon", color_2:str="saddlebrown"):
+
+def plot_all_chromosomes(
+    df_roh: pd.DataFrame,
+    df_roh2: pd.DataFrame | None = None,
+    unit: Literal["BP", "Morgans"] = "Morgans",
+    legend: tuple | None = None,
+    ax=None,
+    chr_lgts=chromosome_lengthsM_human,
+    color_1: str = "maroon",
+    color_2: str = "saddlebrown",
+):
     """Plot ROH in a genome. If given two dataframes, plot them side by side for comparison."""
 
     if ax is None:
@@ -237,59 +375,97 @@ def plot_all_chromosomes(df_roh:pd.DataFrame, df_roh2:pd.DataFrame|None=None,
     ax.set_ylim(-0.05 * np.max(chr_lgts), 1.05 * np.max(chr_lgts))
 
     ### Format the axis
-    ax.set_xticks([i for i in range(1, len(chr_lgts)+1)])
-    ax.tick_params(axis='x', which='both', bottom=False, top=False)
+    ax.set_xticks([i for i in range(1, len(chr_lgts) + 1)])
+    ax.tick_params(axis="x", which="both", bottom=False, top=False)
     ax.set_xlabel("Chromosome")
-    ax.set_ylabel("Position (bp)" if unit=="BP" else "Position (Morgan)")
+    ax.set_ylabel("Position (bp)" if unit == "BP" else "Position (Morgan)")
 
     ### Plot the chromosomes
     for ch, ch_len in enumerate(chr_lgts, start=1):
-        df_ch = df_roh[df_roh['ch'] == ch]
+        df_ch = df_roh[df_roh["ch"] == ch]
         if df_roh2 is not None:
-            df_ch2 = df_roh2[df_roh2['ch'] == ch]
+            df_ch2 = df_roh2[df_roh2["ch"] == ch]
         else:
             df_ch2 = None
-        _plot_single_chromosome(ax, pos_x=ch, chrom_length=ch_len, df_RG=df_ch, df_RG2=df_ch2, unit=unit, color_1=color_1, color_2=color_2)
+        _plot_single_chromosome(
+            ax,
+            pos_x=ch,
+            chrom_length=ch_len,
+            df_RG=df_ch,
+            df_RG2=df_ch2,
+            unit=unit,
+            color_1=color_1,
+            color_2=color_2,
+        )
 
     if df_roh2 is not None and legend is not None:
-        legend_elements = [Patch(facecolor=color_1, edgecolor=color_1, label=legend[0]),
-                        Patch(facecolor=color_2, edgecolor=color_2, label=legend[1])]
-        ax.legend(handles=legend_elements, bbox_to_anchor=(0.5, 1.03), loc="upper center", ncols=2)
+        legend_elements = [
+            Patch(facecolor=color_1, edgecolor=color_1, label=legend[0]),
+            Patch(facecolor=color_2, edgecolor=color_2, label=legend[1]),
+        ]
+        ax.legend(
+            handles=legend_elements,
+            bbox_to_anchor=(0.5, 1.03),
+            loc="upper center",
+            ncols=2,
+        )
 
     return fig, ax
-#___________________________________________________
+
+
+# ___________________________________________________
 # Detail of results for one individual on one chromosome
-#___________________________________________________
-def plot_chromosome_detail(df_roh:pd.DataFrame|None=None, df_roh_2:pd.DataFrame|None=None, df_het:pd.DataFrame|None=None,
-                            unit:Literal['M', 'BP']='M',
-                            chrom:int|list|None=None, sample:str|None=None,
-                            max_points:int|None=10000,
-                            window_size:float|None=None, step_size:float|None=None,
-                            roh_label:None|str=None, roh_2_label:None|str=None,
-                            figsize:tuple|None=None,
-                            kwargs_roh_1:dict={'color':'maroon', 'alpha':1, 'linewidth':6},
-                            kwargs_roh_2:dict={'color':'saddlebrown', 'alpha':1, 'linewidth':6},
-                            kwargs_het:dict={'color':'blue', 'alpha' : 0.01, 's' : 3},
-                            marker_style=MarkerStyle('o', fillstyle='none')):
-    """Plot the given ROH, along with the heterozygosity. If given two dataframes, plot them side by side for comparison.
-    """
+# ___________________________________________________
+def plot_chromosome_detail(
+    df_roh: pd.DataFrame | None = None,
+    df_roh_2: pd.DataFrame | None = None,
+    df_het: pd.DataFrame | None = None,
+    unit: Literal["M", "BP"] = "M",
+    chrom: int | list | None = None,
+    sample: str | None = None,
+    max_points: int | None = 10000,
+    window_size: float | None = None,
+    step_size: float | None = None,
+    roh_label: None | str = None,
+    roh_2_label: None | str = None,
+    figsize: tuple | None = None,
+    kwargs_roh_1: dict | None = None,
+    kwargs_roh_2: dict | None = None,
+    kwargs_het: dict | None = None,
+    marker_style=MarkerStyle("o", fillstyle="none"),
+):
+    """Plot the given ROH, along with the heterozygosity. If given two dataframes, plot them side by side for comparison."""
+
+    kwargs_roh_1 = {
+        "color": "maroon",
+        "alpha": 1,
+        "linewidth": 6,
+        **(kwargs_roh_1 or {}),
+    }
+    kwargs_roh_2 = {
+        "color": "saddlebrown",
+        "alpha": 1,
+        "linewidth": 6,
+        **(kwargs_roh_2 or {}),
+    }
+    kwargs_het = {"color": "blue", "alpha": 0.01, "s": 3, **(kwargs_het or {})}
 
     if df_roh is None and df_het is None:
         raise ValueError("At least one of df_roh or df_het must be provided.")
 
     if chrom is None:
         if df_roh is not None:
-            chrom = df_roh['ch'].unique()
+            chrom = df_roh["ch"].unique()
         else:
-            chrom = df_het['ch'].unique()
+            chrom = df_het["ch"].unique()
     elif isinstance(chrom, int):
         chrom = [chrom]
 
     if sample is not None:
         if df_roh is not None:
-            df_roh = df_roh[df_roh['iid'] == sample]
+            df_roh = df_roh[df_roh["iid"] == sample]
         if df_roh_2 is not None:
-            df_roh_2 = df_roh_2[df_roh_2['iid'] == sample]
+            df_roh_2 = df_roh_2[df_roh_2["iid"] == sample]
 
     # Create figure
     if figsize is None:
@@ -302,56 +478,96 @@ def plot_chromosome_detail(df_roh:pd.DataFrame|None=None, df_roh_2:pd.DataFrame|
         print(f"Plotting chromosome {chr}")
         # Plot heterozygosity if provided
         if df_het is not None and len(df_het) > 0:
-            df_het_ch: pd.DataFrame = df_het[df_het['ch'].astype(str)==str(chr)]
+            df_het_ch: pd.DataFrame = df_het[df_het["ch"].astype(str) == str(chr)]
 
             # Scatter heterozygous SNP
             if max_points is not None:
                 rng = np.random.default_rng()
-                subset = rng.choice(df_het_ch.index, size=int(min(len(df_het_ch.index), max_points)), replace=False)
+                subset = rng.choice(
+                    df_het_ch.index,
+                    size=int(min(len(df_het_ch.index), max_points)),
+                    replace=False,
+                )
                 df_het_ch = df_het_ch.loc[subset]
-            ax.scatter(df_het_ch[f'pos{unit}'], df_het_ch['het'].astype(int), marker=marker_style, **kwargs_het)
+            ax.scatter(
+                df_het_ch[f"pos{unit}"],
+                df_het_ch["het"].astype(int),
+                marker=marker_style,
+                **kwargs_het,
+            )
 
             # Add percentage of heterozygous SNPs over a slinding window
             if (window_size is not None) and (window_size is not None):
-                if df_het_ch[f"pos{unit}"].max()/window_size > 1e6:
-                    raise(ValueError("To small steps for sliding window. Verify that step_side and unit match"))
-                starts = np.arange(0, df_het_ch[f"pos{unit}"].max()-window_size, step_size)
+                if df_het_ch[f"pos{unit}"].max() / window_size > 1e6:
+                    raise (
+                        ValueError(
+                            "To small steps for sliding window. Verify that step_side and unit match"
+                        )
+                    )
+                starts = np.arange(
+                    0, df_het_ch[f"pos{unit}"].max() - window_size, step_size
+                )
             else:
-                starts = np.linspace(0, 0.99*df_het_ch[f"pos{unit}"].max(),100)
+                starts = np.linspace(0, 0.99 * df_het_ch[f"pos{unit}"].max(), 100)
                 window_size = starts[1] - starts[0]
             het_percentage = []
             for start in starts:
-                mask = (df_het_ch[f"pos{unit}"] >= start) & (df_het_ch[f"pos{unit}"] < start+window_size)
+                mask = (df_het_ch[f"pos{unit}"] >= start) & (
+                    df_het_ch[f"pos{unit}"] < start + window_size
+                )
                 if mask.sum() > 0:
                     het_percentage.append(df_het_ch.loc[mask, "het"].mean())
                 else:
                     het_percentage.append(np.nan)
-            ax.plot(starts+window_size/2, het_percentage, color='black', linewidth=0.5)
+            ax.plot(
+                starts + window_size / 2, het_percentage, color="black", linewidth=0.5
+            )
 
         # Plot ROH segments
         if df_roh is not None:
-            df_roh_ch = df_roh[df_roh['ch'].astype(str)==str(chr)]
-            ax.hlines(xmin=df_roh_ch[f'Start{unit}'], xmax=df_roh_ch[f'End{unit}'],
-                      y=[1.2]*len(df_roh_ch.index),**kwargs_roh_1)
+            df_roh_ch = df_roh[df_roh["ch"].astype(str) == str(chr)]
+            ax.hlines(
+                xmin=df_roh_ch[f"Start{unit}"],
+                xmax=df_roh_ch[f"End{unit}"],
+                y=[1.2] * len(df_roh_ch.index),
+                **kwargs_roh_1,
+            )
         if df_roh_2 is not None:
-            df_roh_2_ch = df_roh_2[df_roh_2['ch'].astype(str)==str(chr)]
-            ax.hlines(xmin=df_roh_2_ch[f'Start{unit}'], xmax=df_roh_2_ch[f'End{unit}'],
-                      y=[1.4]*len(df_roh_2_ch.index),**kwargs_roh_2)
+            df_roh_2_ch = df_roh_2[df_roh_2["ch"].astype(str) == str(chr)]
+            ax.hlines(
+                xmin=df_roh_2_ch[f"Start{unit}"],
+                xmax=df_roh_2_ch[f"End{unit}"],
+                y=[1.4] * len(df_roh_2_ch.index),
+                **kwargs_roh_2,
+            )
 
         ### Format ax
         ax.set_title(f"Chromosome {chr}")
         ax.set_yticks([0, 1])
-        ax.tick_params(axis='y', which='minor', left=False, right=False)
+        ax.tick_params(axis="y", which="minor", left=False, right=False)
 
         ax.set_xlabel(f"Genetic position ({unit})")
         ax.set_ylabel("Heterozygosity")
-        ax.set_yticks([1.2, 1.4], labels=[roh_label, roh_2_label], rotation=0, minor=True)
+        ax.set_yticks(
+            [1.2, 1.4], labels=[roh_label, roh_2_label], rotation=0, minor=True
+        )
 
     return fig, axes
-#___________________________________________________
+
+
+# ___________________________________________________
 # Heatmap of log-likelihood
-#___________________________________________________
-def plot_ll_heatmap(ll, t_grid, admix_grid, true_admix=None, true_time=None, gamma=10, ax=None, figsize=None):
+# ___________________________________________________
+def plot_ll_heatmap(
+    ll,
+    t_grid,
+    admix_grid,
+    true_admix=None,
+    true_time=None,
+    gamma=10,
+    ax=None,
+    figsize=None,
+):
     """Plot log-likelihood heatmap."""
     # Create figure
     if figsize is None:
@@ -362,35 +578,58 @@ def plot_ll_heatmap(ll, t_grid, admix_grid, true_admix=None, true_time=None, gam
         fig = ax.get_figure()
 
     norm = mcolors.PowerNorm(gamma=gamma)
-    c = ax.imshow(ll, origin='lower', aspect='auto', extent=(admix_grid[0], admix_grid[-1], t_grid[0], t_grid[-1]), cmap='viridis', norm=norm)
-    cbar = fig.colorbar(c, ax=ax, label='Log-Likelihood')
-    ticks = np.linspace(0,1, num=7)
+    c = ax.imshow(
+        ll,
+        origin="lower",
+        aspect="auto",
+        extent=(admix_grid[0], admix_grid[-1], t_grid[0], t_grid[-1]),
+        cmap="viridis",
+        norm=norm,
+    )
+    cbar = fig.colorbar(c, ax=ax, label="Log-Likelihood")
+    ticks = np.linspace(0, 1, num=7)
     ticks = norm.inverse(ticks)
     ticks_r = np.round(ticks, 0)
     if len(np.unique(ticks_r)) < 7:
         ticks_r = np.round(ticks, 1)
-    cbar.set_ticks(ticks_r) # type: ignore
+    cbar.set_ticks(ticks_r)  # type: ignore
 
     # MLE point
     time_opt, admix_opt = np.unravel_index(np.argmax(ll, axis=None), ll.shape)
     time_opt = t_grid[time_opt]
     admix_opt = admix_grid[admix_opt]
-    ax.scatter(admix_opt, time_opt, marker='+', color='red', s=100, label=f'MLE: time={time_opt:.0f}, admix={admix_opt:.2f}')
+    ax.scatter(
+        admix_opt,
+        time_opt,
+        marker="+",
+        color="red",
+        s=100,
+        label=f"MLE: time={time_opt:.0f}, admix={admix_opt:.2f}",
+    )
     # True optimal point
     if true_time is not None:
-        ax.scatter(true_admix, true_time, marker='x', color='firebrick', s=100, label=f'True: time={true_time}, admix={true_admix:.2f}')
+        ax.scatter(
+            true_admix,
+            true_time,
+            marker="x",
+            color="firebrick",
+            s=100,
+            label=f"True: time={true_time}, admix={true_admix:.2f}",
+        )
 
     # Confidence interval contour
-    threshold_2d = np.max(ll) - 5.991/2     # # chi^2(2, 0.95)/2
-    cs = ax.contour(admix_grid, t_grid, ll, levels=[threshold_2d], colors='red', linewidths=2)
+    threshold_2d = np.max(ll) - 5.991 / 2  # # chi^2(2, 0.95)/2
+    cs = ax.contour(
+        admix_grid, t_grid, ll, levels=[threshold_2d], colors="red", linewidths=2
+    )
 
     # Build legend with existing handles + contour
     handles, labels = ax.get_legend_handles_labels()
     contour_handle, _ = cs.legend_elements()  # unpacks the list of one handle
-    contour_handle[0].set_label('95% CI')
-    ax.legend(handles=handles + contour_handle, labels=labels + ['95% CI'])
+    contour_handle[0].set_label("95% CI")
+    ax.legend(handles=handles + contour_handle, labels=labels + ["95% CI"])
 
-    ax.set_xlabel('Admixture Proportion')
-    ax.set_ylabel('Time passed (generations)')
-    ax.set_title('Log-likelihood colormap')
+    ax.set_xlabel("Admixture Proportion")
+    ax.set_ylabel("Time passed (generations)")
+    ax.set_title("Log-likelihood colormap")
     return fig, ax
