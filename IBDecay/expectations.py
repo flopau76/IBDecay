@@ -20,26 +20,22 @@ def roh_density_Ne(x, Ne: float, chr_lgts=chromosome_lengthsM_human):
     Args:
         x: length [in Morgan] where to evaluate the density. Can be a float or an array of float
         Ne: effective population size
-        chr_lgts: chromosome lengths [in Morgan]"""
+        chr_lgts: chromosome lengths [in Morgan]
+    Note:
+        This ignores the point probability for x=chr_lgt"""
     pdfs = [_roh_density_Ne_chr(x, Ne, chr_l) for chr_l in chr_lgts]
     pdf_total = np.sum(pdfs, axis=0)
     return pdf_total
 
 
 def _roh_count_Ne_chr(x, Ne: float, chr_l: float):
-    """helper function: integrand of roh_density(x) between x and chr_L"""
-    x = np.clip(x, 0, chr_l)
-    return (
-        8
-        * Ne
-        * (chr_l - x)
-        * (1 + 2 * Ne * (chr_l + x))
-        / ((1 + 4 * chr_l * Ne) * (1 + 4 * x * Ne) ** 2)
-    )
+    """helper function: number of ROH longer than x, for a chomosome of length chr_l"""
+    xc = np.clip(x, 0, chr_l)
+    return (1 + 4 * Ne * chr_l) / (1 + 4 * Ne * xc) ** 2 * (x <= chr_l)
 
 
 def roh_count_Ne(bins=(0, np.inf), Ne: float = 100, chr_lgts=chromosome_lengthsM_human):
-    """Returns the expected number of ROH blocks in a given interval, given an effective population size.
+    """Returns the expected number of ROH in a given interval, given an effective population size.
     Args:
         bins: tuple or array size (2,n) with bin edges [in Morgan]
         Ne: effective population size
@@ -53,19 +49,15 @@ def roh_count_Ne(bins=(0, np.inf), Ne: float = 100, chr_lgts=chromosome_lengthsM
 
 
 def _roh_sum_Ne_chr(x, Ne: float, chr_l: float):
-    """helper function: integrand of x * roh_density(x) between x and chr_L"""
-    x = np.clip(x, 0, chr_l)
+    """helper function: cummuative length of ROH longer than x, for a chomosome of length chr_l"""
+    xc = np.clip(x, 0, chr_l)
     return (
-        4
-        * Ne
-        * (chr_l - x)
-        * (chr_l + x + 8 * chr_l * x * Ne)
-        / ((1 + 4 * chr_l * Ne) * (1 + 4 * x * Ne) ** 2)
+        (chr_l + 4 * Ne * xc * (2 * chr_l - xc)) / (1 + 4 * xc * Ne) ** 2 * (x <= chr_l)
     )
 
 
 def roh_sum_Ne(bins=(0, np.inf), Ne: float = 100, chr_lgts=chromosome_lengthsM_human):
-    """Returns the expected summed length [in Morgan] of ROH blocks in a given interval, given an effective population size.
+    """Returns the expected cummulative length [in Morgan] of ROH in a given interval, given an effective population size.
     Args:
         bins: tuple or array size (2,n) with bin edges [in Morgan]
         Ne: effective population size
