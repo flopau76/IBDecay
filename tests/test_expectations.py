@@ -98,12 +98,12 @@ def ibd_lengths_decayed():
 class TestRohNe:
     def test_count_matches_simulation(self, roh_lengths):
         observed, sigma = _bin_counts(roh_lengths, N_SIM_ROH)
-        expected = roh_count_Ne((BINS[:-1], BINS[1:]), Ne=NE, chr_lgts=CHR_LGTS)
+        expected = roh_count_Ne(BINS, Ne=NE, chr_lgts=CHR_LGTS)
         _assert_matches(observed, expected, sigma)
 
     def test_sum_matches_simulation(self, roh_lengths):
         observed, sigma = _bin_sums(roh_lengths, N_SIM_ROH)
-        expected = roh_sum_Ne((BINS[:-1], BINS[1:]), Ne=NE, chr_lgts=CHR_LGTS)
+        expected = roh_sum_Ne(BINS, Ne=NE, chr_lgts=CHR_LGTS)
         _assert_matches(observed, expected, sigma)
 
 
@@ -116,12 +116,12 @@ class TestRohNe:
 class TestIbdNe:
     def test_count_matches_simulation(self, ibd_lengths):
         observed, sigma = _bin_counts(ibd_lengths, N_SIM_IBD)
-        expected = ibd_count_Ne((BINS[:-1], BINS[1:]), Ne=NE, chr_lgts=CHR_LGTS)
+        expected = ibd_count_Ne(BINS, Ne=NE, chr_lgts=CHR_LGTS)
         _assert_matches(observed, expected, sigma)
 
     def test_sum_matches_simulation(self, ibd_lengths):
         observed, sigma = _bin_sums(ibd_lengths, N_SIM_IBD)
-        expected = ibd_sum_Ne((BINS[:-1], BINS[1:]), Ne=NE, chr_lgts=CHR_LGTS)
+        expected = ibd_sum_Ne(BINS, Ne=NE, chr_lgts=CHR_LGTS)
         _assert_matches(observed, expected, sigma)
 
 

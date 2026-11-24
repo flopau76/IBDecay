@@ -28,46 +28,34 @@ def roh_density_Ne(x, Ne: float, chr_lgts=chromosome_lengthsM_human):
     return pdf_total
 
 
-def _roh_count_Ne_chr(x, Ne: float, chr_l: float):
-    """helper function: number of ROH longer than x, for a chomosome of length chr_l"""
-    xc = np.clip(x, 0, chr_l)
-    return (1 + 4 * Ne * chr_l) / (1 + 4 * Ne * xc) ** 2 * (x <= chr_l)
-
-
 def roh_count_Ne(bins=(0, np.inf), Ne: float = 100, chr_lgts=chromosome_lengthsM_human):
     """Returns the expected number of ROH in a given interval, given an effective population size.
     Args:
-        bins: tuple or array size (2,n) with bin edges [in Morgan]
+        bins: 1-D array of bin edges, shape (n+1,) [in Morgan]
         Ne: effective population size
         chr_lgts: chromosome lengths [in Morgan]"""
-    counts = [
-        _roh_count_Ne_chr(bins[0], Ne, chr_l) - _roh_count_Ne_chr(bins[1], Ne, chr_l)
-        for chr_l in chr_lgts
-    ]
-    counts_total = np.sum(counts, axis=0)
-    return counts_total
-
-
-def _roh_sum_Ne_chr(x, Ne: float, chr_l: float):
-    """helper function: cummuative length of ROH longer than x, for a chomosome of length chr_l"""
-    xc = np.clip(x, 0, chr_l)
-    return (
-        (chr_l + 4 * Ne * xc * (2 * chr_l - xc)) / (1 + 4 * xc * Ne) ** 2 * (x <= chr_l)
-    )
+    edges = np.asarray(bins, dtype=float)
+    chr_l = np.asarray(chr_lgts, dtype=float)[:, None]
+    xc = np.minimum(np.maximum(edges, 0), chr_l)
+    n_longer = (1 + 4 * Ne * chr_l) / (1 + 4 * Ne * xc) ** 2 * (edges <= chr_l)
+    return -np.diff(n_longer, axis=1).sum(axis=0).squeeze()
 
 
 def roh_sum_Ne(bins=(0, np.inf), Ne: float = 100, chr_lgts=chromosome_lengthsM_human):
     """Returns the expected cummulative length [in Morgan] of ROH in a given interval, given an effective population size.
     Args:
-        bins: tuple or array size (2,n) with bin edges [in Morgan]
+        bins: 1-D array of bin edges, shape (n+1,) [in Morgan]
         Ne: effective population size
         chr_lgts: chromosome lengths [in Morgan]"""
-    sums = [
-        _roh_sum_Ne_chr(bins[0], Ne, chr_l) - _roh_sum_Ne_chr(bins[1], Ne, chr_l)
-        for chr_l in chr_lgts
-    ]
-    sums_total = np.sum(sums, axis=0)
-    return sums_total
+    edges = np.asarray(bins, dtype=float)
+    chr_l = np.asarray(chr_lgts, dtype=float)[:, None]
+    xc = np.minimum(np.maximum(edges, 0), chr_l)
+    sum_longer = (
+        (chr_l + 4 * Ne * xc * (2 * chr_l - xc))
+        / (1 + 4 * xc * Ne) ** 2
+        * (edges <= chr_l)
+    )
+    return -np.diff(sum_longer, axis=1).sum(axis=0).squeeze()
 
 
 #### IBD based on Ne
@@ -85,7 +73,7 @@ def ibd_density_Ne(x, Ne: float, chr_lgts=chromosome_lengthsM_human):
 def ibd_count_Ne(bins=(0, np.inf), Ne: float = 100, chr_lgts=chromosome_lengthsM_human):
     """Returns the expected number of IBD blocks in a given interval, given an effective population size.
     Args:
-        bins: tuple or array size (2,n) with bin edges [in Morgan]
+        bins: 1-D array of bin edges, shape (n+1,) [in Morgan]
         Ne: effective population size
         chr_lgts: chromosome lengths [in Morgan]"""
     return 4 * roh_count_Ne(bins, Ne, chr_lgts)
@@ -94,7 +82,7 @@ def ibd_count_Ne(bins=(0, np.inf), Ne: float = 100, chr_lgts=chromosome_lengthsM
 def ibd_sum_Ne(bins=(0, np.inf), Ne: float = 100, chr_lgts=chromosome_lengthsM_human):
     """Returns the expected summed length [in Morgan] of IBD blocks in a given interval, given an effective population size.
     Args:
-        bins: tuple or array size (2,n) with bin edges [in Morgan]
+        bins: 1-D array of bin edges, shape (n+1,) [in Morgan]
         Ne: effective population size
         chr_lgts: chromosome lengths [in Morgan]"""
     return 4 * roh_sum_Ne(bins, Ne, chr_lgts)
